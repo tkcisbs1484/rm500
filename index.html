@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v28</title>
+<title>RM500 Logger v29</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
@@ -33,54 +33,35 @@ Fan <input id="fan">
 <button onclick="save()">Save</button>
 </div>
 
-<div class="card">
-<button onclick="eventSave('Charge')">Charge</button>
-<button onclick="eventSave('Bottom')">Bottom</button>
-<button onclick="eventSave('GC')">GC</button>
-<button onclick="eventSave('FC')">1st Crack</button>
-<button onclick="eventSave('Drop')">Drop</button>
-</div>
-
 <canvas id="c" width="1000" height="520"></canvas>
 
 <script>
-let rows=[],events={},run=false,startT=0,base=0;
+let rows=[],run=false,startT=0,base=0;
+
+const timeEl = document.getElementById("time");
 
 function now(){return run?base+Math.floor((Date.now()-startT)/1000):base}
 function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
 
 function start(){if(run)return;run=true;startT=Date.now();loop()}
 function pause(){base=now();run=false}
-function reset(){base=0;run=false;rows=[];events={};draw()}
+function reset(){base=0;run=false;rows=[];draw()}
 
 function shift(d){base=Math.max(0,now()+d);startT=Date.now()}
 
 function loop(){
-time.innerText=fmt(now());
+timeEl.innerText=fmt(now());
 draw();
 if(run)requestAnimationFrame(loop);
 }
 
 function save(){
 let t=now();
-let bt=parseFloat(bt.value);
-let pw=parseFloat(pw.value);
-let fan=parseFloat(fan.value);
-if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return;
-rows.push({t,bt,pw,fan});
+let bt=parseFloat(document.getElementById("bt").value);
+if(isNaN(bt))return;
+rows.push({t,bt});
 rows.sort((a,b)=>a.t-b.t);
-bt.value="";pw.value="";fan.value="";
-}
-
-function eventSave(name){events[name]=now()}
-
-function ror(i){
-if(i<1)return null;
-let a=rows[i],b=rows[i-1];
-if(isNaN(a.bt)||isNaN(b.bt))return null;
-let dt=(a.t-b.t)/60;
-if(dt<=0)return null;
-return (a.bt-b.bt)/dt;
+document.getElementById("bt").value="";
 }
 
 function draw(){
@@ -90,7 +71,6 @@ let ctx=c.getContext("2d");
 ctx.clearRect(0,0,c.width,c.height);
 
 let L=80,T=20,W=840,H=420;
-
 let maxT=14*60;
 let maxTemp=230;
 
@@ -127,7 +107,6 @@ if(rows.length>0){
 ctx.strokeStyle="black";
 ctx.beginPath();
 rows.forEach((r,i)=>{
-if(isNaN(r.bt))return;
 let xx=x(r.t),yy=y(r.bt);
 if(i==0)ctx.moveTo(xx,yy);
 else ctx.lineTo(xx,yy);
@@ -135,13 +114,12 @@ else ctx.lineTo(xx,yy);
 ctx.stroke();
 
 rows.forEach(r=>{
-if(isNaN(r.bt))return;
 let xx=x(r.t),yy=y(r.bt);
 ctx.fillText(r.bt,xx+5,yy-5);
 });
 }
 
-ctx.fillText("RM500 v28 GRAPH OK",L+10,T+20);
+ctx.fillText("RM500 v29 OK",L+10,T+20);
 }
 
 draw();
