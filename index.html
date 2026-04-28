@@ -3,222 +3,257 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v30 Complete</title>
+<title>RM500 Logger v33 Pro</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
 button{padding:10px;margin:3px;border-radius:6px;border:0;background:#222;color:#fff}
-input{padding:8px;margin:3px;width:80px}
+button.green{background:#17633a}button.gray{background:#666}button.red{background:#9b1c1c}
+input,select{padding:8px;margin:3px;width:120px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:500px;border:2px solid #000;border-radius:10px;background:white}
+canvas{width:100%;height:520px;border:2px solid #000;border-radius:10px;background:white}
+.metric{display:inline-block;background:#eee;border-radius:8px;padding:8px;margin:4px;min-width:120px}
+.small{font-size:12px;color:#666}
 </style>
 </head>
 <body>
 
 <div class="card">
-<div id="time">00:00</div>
-<button onclick="start()">Start</button>
-<button onclick="pause()">Pause</button>
-<button onclick="reset()">Reset</button>
-<button onclick="shift(-10)">-10s</button>
-<button onclick="shift(10)">+10s</button>
+<div id="time">0:00</div>
+<button onclick="startTimer()">Timer Start</button>
+<button onclick="pauseTimer()">Pause</button>
+<button onclick="resetAll()">Reset</button>
+<button onclick="shiftTime(-10)">-10s</button>
+<button onclick="shiftTime(10)">+10s</button>
 </div>
 
 <div class="card">
-BT <input id="bt">
-Power <input id="pw">
-Fan <input id="fan">
-<button onclick="save()">Save</button>
+BT <input id="bt" type="number">
+Power <input id="pw" type="number">
+Fan <input id="fan" type="number">
+<button onclick="savePoint()">Save</button>
 </div>
 
 <div class="card">
-<button onclick="eventSave('Charge')">Charge</button>
-<button onclick="eventSave('Bottom')">Bottom</button>
-<button onclick="eventSave('GC')">GC</button>
-<button onclick="eventSave('FC')">1st Crack</button>
-<button onclick="eventSave('Drop')">Drop</button>
+<button onclick="markEvent('Start')">Start</button>
+<button onclick="markEvent('Bottom')">Bottom</button>
+<button onclick="markEvent('GC')">GC</button>
+<button onclick="markEvent('FC')">1st Crack</button>
+<button onclick="markEvent('Drop')">Drop</button>
 </div>
 
-<canvas id="c" width="1050" height="560"></canvas>
+<div class="card">
+<span class="metric">Dry <b id="dryPct">-</b></span>
+<span class="metric">Maillard <b id="maiPct">-</b></span>
+<span class="metric">Development <b id="devPct">-</b></span>
+<span class="metric">DTR <b id="dtrPct">-</b></span>
+</div>
+
+<div class="card">
+Profile Name <input id="profileName" placeholder="profile name">
+<button class="green" onclick="saveProfile()">Save Profile</button>
+<select id="profileList"></select>
+<button onclick="loadProfile()">Load</button>
+<button onclick="setReference()">Set as Reference</button>
+<button class="gray" onclick="clearReference()">Clear Reference</button>
+<button class="red" onclick="deleteProfile()">Delete</button>
+<div class="small" id="refStatus">Reference: none</div>
+</div>
+
+<canvas id="c" width="1100" height="600"></canvas>
 
 <script>
-let rows=[],events={},run=false,startT=0,base=0;
+const STORE_KEY="rm500_v33_profiles";
+const REF_KEY="rm500_v33_reference";
+let rows=[],events={},reference=null,referenceName="";
+let running=false,startT=0,base=0;
 const timeEl=document.getElementById("time");
 
-function now(){return run?base+Math.floor((Date.now()-startT)/1000):base}
-function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
+function now(){return running ? base + Math.floor((Date.now()-startT)/1000) : base}
+function fmt(s){s=Math.max(0,Math.floor(s));let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
+function startTimer(){if(running)return;running=true;startT=Date.now();loop()}
+function pauseTimer(){base=now();running=false;timeEl.innerText=fmt(base);draw()}
+function resetAll(){if(!confirm("Reset all roast data?"))return;base=0;running=false;rows=[];events={};timeEl.innerText="0:00";updatePhaseDisplay();draw()}
+function shiftTime(d){base=Math.max(0,now()+d);if(running)startT=Date.now();timeEl.innerText=fmt(base);draw()}
+function loop(){timeEl.innerText=fmt(now());draw();if(running)requestAnimationFrame(loop)}
 
-function start(){if(run)return;run=true;startT=Date.now();loop()}
-function pause(){base=now();run=false}
-function reset(){base=0;run=false;rows=[];events={};timeEl.innerText="00:00";draw()}
-function shift(d){base=Math.max(0,now()+d);startT=Date.now();timeEl.innerText=fmt(now());draw()}
+function savePoint(){
+  let t=now();
+  let bt=parseFloat(document.getElementById("bt").value);
+  let pw=parseFloat(document.getElementById("pw").value);
+  let fan=parseFloat(document.getElementById("fan").value);
+  if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return;
+  rows.push({t,bt,pw,fan});
+  rows.sort((a,b)=>a.t-b.t);
+  document.getElementById("bt").value="";
+  document.getElementById("pw").value="";
+  document.getElementById("fan").value="";
+  draw();
+}
+function markEvent(name){events[name]=now();updatePhaseDisplay();draw()}
 
-function loop(){
-timeEl.innerText=fmt(now());
-draw();
-if(run)requestAnimationFrame(loop);
+function btRows(dataRows=rows){return dataRows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t)}
+function rawRor(dataRows=rows){
+  let b=btRows(dataRows),out=[];
+  for(let i=1;i<b.length;i++){
+    let dt=(b[i].t-b[i-1].t)/60;
+    if(dt>0)out.push({t:b[i].t,v:(b[i].bt-b[i-1].bt)/dt});
+  }
+  return out;
 }
-
-function save(){
-let t=now();
-let bt=parseFloat(document.getElementById("bt").value);
-let pw=parseFloat(document.getElementById("pw").value);
-let fan=parseFloat(document.getElementById("fan").value);
-if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return;
-rows.push({t,bt,pw,fan});
-rows.sort((a,b)=>a.t-b.t);
-document.getElementById("bt").value="";
-document.getElementById("pw").value="";
-document.getElementById("fan").value="";
-draw();
+function smoothRor(dataRows=rows){
+  let r=rawRor(dataRows),out=[];
+  for(let i=0;i<r.length;i++){
+    let vals=[];
+    for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++)vals.push(r[j].v);
+    out.push({t:r[i].t,v:vals.reduce((a,b)=>a+b,0)/vals.length});
+  }
+  return out;
 }
-
-function eventSave(name){
-events[name]=now();
-draw();
+function phaseData(ev=events){
+  let start=ev.Start,gc=ev.GC,fc=ev.FC,drop=ev.Drop;
+  if(start==null)start=0;
+  if(gc==null||fc==null||drop==null||drop<=0)return null;
+  return {start,gc,fc,drop,dry:gc-start,mai:fc-gc,dev:drop-fc,total:drop};
 }
-
-function btRows(){
-return rows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
-}
-
-function rawRor(){
-let b=btRows(),out=[];
-for(let i=1;i<b.length;i++){
-let dt=(b[i].t-b[i-1].t)/60;
-if(dt>0)out.push({t:b[i].t,v:(b[i].bt-b[i-1].bt)/dt});
-}
-return out;
-}
-
-function smoothRor(){
-let r=rawRor(),out=[];
-for(let i=0;i<r.length;i++){
-let vals=[];
-for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++)vals.push(r[j].v);
-out.push({t:r[i].t,v:vals.reduce((a,b)=>a+b,0)/vals.length});
-}
-return out;
+function updatePhaseDisplay(){
+  let p=phaseData();
+  if(!p){dryPct.innerText="-";maiPct.innerText="-";devPct.innerText="-";dtrPct.innerText="-";return}
+  let dry=p.dry/p.total*100,mai=p.mai/p.total*100,dev=p.dev/p.total*100;
+  dryPct.innerText=fmt(p.dry)+" / "+dry.toFixed(0)+"%";
+  maiPct.innerText=fmt(p.mai)+" / "+mai.toFixed(0)+"%";
+  devPct.innerText=fmt(p.dev)+" / "+dev.toFixed(0)+"%";
+  dtrPct.innerText=dev.toFixed(1)+"%";
 }
 
 function draw(){
-let c=document.getElementById("c"),ctx=c.getContext("2d");
-ctx.clearRect(0,0,c.width,c.height);
+  updatePhaseDisplay();
+  let c=document.getElementById("c"),ctx=c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+  let L=85,R=85,T=25,B=85,W=c.width-L-R,H=c.height-T-B;
+  let maxT=14*60,maxTemp=230,maxRor=30;
+  let x=t=>L+(t/maxT)*W;
+  let yBT=v=>T+H-(v/maxTemp)*H;
+  let yRor=v=>T+H-(Math.max(0,Math.min(maxRor,v))/maxRor)*H;
+  let yPct=v=>T+H-(Math.max(0,Math.min(100,v))/100)*H;
 
-let L=85,R=85,T=25,B=75,W=c.width-L-R,H=c.height-T-B;
-let maxT=14*60,maxTemp=230,maxRor=30;
-let x=t=>L+(t/maxT)*W;
-let yBT=v=>T+H-(v/maxTemp)*H;
-let yRor=v=>T+H-(Math.max(0,Math.min(maxRor,v))/maxRor)*H;
-let yPct=v=>T+H-(Math.max(0,Math.min(100,v))/100)*H;
+  ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
 
-ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+  let p=phaseData();
+  if(p){
+    ctx.fillStyle="rgba(242,214,162,.45)";ctx.fillRect(x(p.start),T,x(p.gc)-x(p.start),H);
+    ctx.fillStyle="rgba(212,180,140,.45)";ctx.fillRect(x(p.gc),T,x(p.fc)-x(p.gc),H);
+    ctx.fillStyle="rgba(200,136,111,.45)";ctx.fillRect(x(p.fc),T,x(p.drop)-x(p.fc),H);
+  }
 
-// phase bands
-if(events.Charge!=null&&events.GC!=null){
-ctx.fillStyle="rgba(242,214,162,.5)";
-ctx.fillRect(x(events.Charge),T,x(events.GC)-x(events.Charge),H);
-}
-if(events.GC!=null&&events.FC!=null){
-ctx.fillStyle="rgba(212,180,140,.5)";
-ctx.fillRect(x(events.GC),T,x(events.FC)-x(events.GC),H);
-}
-if(events.FC!=null&&events.Drop!=null){
-ctx.fillStyle="rgba(200,136,111,.5)";
-ctx.fillRect(x(events.FC),T,x(events.Drop)-x(events.FC),H);
-}
+  ctx.font="16px Arial";ctx.textBaseline="middle";
+  for(let temp=0;temp<=230;temp+=5){
+    let yy=yBT(temp);
+    ctx.strokeStyle=temp%10==0?"#ddd":"#eee";
+    ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(L+W,yy);ctx.stroke();
+    if(temp%10==0){ctx.fillStyle="#000";ctx.fillText(temp+"C",10,yy)}
+  }
+  for(let m=0;m<=14;m++){
+    let xx=x(m*60);
+    ctx.strokeStyle="#e5e5e5";
+    ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
+    ctx.fillStyle="#000";ctx.fillText(m+"m",xx-12,T+H+30);
+  }
+  for(let r=0;r<=30;r+=5){let yy=yRor(r);ctx.fillStyle="#000";ctx.fillText(r,L+W+20,yy)}
 
-// grid temp 5C, labels 10C
-ctx.font="16px Arial";
-ctx.textBaseline="middle";
-for(let temp=0;temp<=230;temp+=5){
-let yy=yBT(temp);
-ctx.strokeStyle=temp%10==0?"#ddd":"#eee";
-ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(L+W,yy);ctx.stroke();
-if(temp%10==0){ctx.fillStyle="#000";ctx.fillText(temp+"C",10,yy);}
-}
+  ctx.strokeStyle="#000";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(L,T);ctx.lineTo(L,T+H);ctx.lineTo(L+W,T+H);ctx.lineTo(L+W,T);ctx.stroke();
+  ctx.fillStyle="#000";ctx.fillText("BT C",L+8,T+16);ctx.fillText("RoR",L+W+20,T+16);
 
-// time 0-14min
-for(let m=0;m<=14;m++){
-let xx=x(m*60);
-ctx.strokeStyle="#e5e5e5";
-ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
-ctx.fillStyle="#000";ctx.fillText(m+"m",xx-12,T+H+30);
-}
+  if(reference&&reference.rows){
+    drawBTLine(ctx,reference.rows,x,yBT,"#8091b3",5,.35,false);
+    drawRorLine(ctx,reference.rows,x,yRor,"#8091b3",2,.45,true);
+  }
 
-// ROR axis
-for(let r=0;r<=30;r+=5){
-let yy=yRor(r);
-ctx.fillStyle="#000";ctx.fillText(r,L+W+20,yy);
-}
+  drawBTLine(ctx,rows,x,yBT,"#000",3,1,true);
+  drawRorLine(ctx,rows,x,yRor,"#777",2,1,true);
+  drawPowerFan(ctx,rows,x,yPct);
 
-// axes
-ctx.strokeStyle="#000";ctx.lineWidth=2;
-ctx.beginPath();ctx.moveTo(L,T);ctx.lineTo(L,T+H);ctx.lineTo(L+W,T+H);ctx.lineTo(L+W,T);ctx.stroke();
-ctx.fillStyle="#000";ctx.fillText("BT C",L+8,T+16);ctx.fillText("RoR",L+W+20,T+16);
+  Object.keys(events).forEach(name=>{
+    let t=events[name],xx=x(t);
+    ctx.strokeStyle="#b36b00";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
+    ctx.fillStyle="#b36b00";ctx.beginPath();ctx.arc(xx,T+18,6,0,Math.PI*2);ctx.fill();
+    ctx.save();ctx.translate(xx+8,T+35);ctx.rotate(Math.PI/2);ctx.font="15px Arial";ctx.fillText(name+" "+fmt(t),0,0);ctx.restore();
+  });
 
-// BT
-let b=btRows();
-if(b.length){
-ctx.strokeStyle="#000";ctx.lineWidth=3;ctx.beginPath();
-b.forEach((p,i)=>{let xx=x(p.t),yy=yBT(p.bt);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
-ctx.stroke();
-b.forEach(p=>{
-let xx=x(p.t),yy=yBT(p.bt);
-ctx.fillStyle="#000";ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();
-ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-12);
-});
-}
-
-// smooth ROR
-let rr=smoothRor();
-if(rr.length){
-ctx.strokeStyle="#777";ctx.lineWidth=2;ctx.setLineDash([6,5]);ctx.beginPath();
-rr.forEach((p,i)=>{let xx=x(p.t),yy=yRor(p.v);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
-ctx.stroke();ctx.setLineDash([]);
+  if(p){
+    let dry=p.dry/p.total*100,mai=p.mai/p.total*100,dev=p.dev/p.total*100;
+    ctx.fillStyle="#333";ctx.font="16px Arial";
+    ctx.fillText("Dry "+dry.toFixed(0)+"%",x(p.start)+8,T+18);
+    ctx.fillText("Maillard "+mai.toFixed(0)+"%",x(p.gc)+8,T+18);
+    ctx.fillText("Dev "+dev.toFixed(0)+"%",x(p.fc)+8,T+18);
+  }
+  ctx.fillStyle="#000";ctx.font="14px Arial";
+  ctx.fillText("RM500 v33 PRO",L+10,T+H-16);
+  ctx.fillText("Reference: blue / Current: black",L+180,T+H-16);
 }
 
-// power
-let pp=rows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
-if(pp.length){
-ctx.strokeStyle="#444";ctx.lineWidth=2;ctx.beginPath();
-pp.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.pw);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
-ctx.stroke();
-ctx.fillStyle="#444";ctx.font="13px Arial";
-pp.forEach(p=>ctx.fillText("P"+p.pw,x(p.t)+4,yPct(p.pw)+12));
+function drawBTLine(ctx,dataRows,x,yBT,color,width,alpha,labels){
+  let b=dataRows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
+  if(!b.length)return;
+  ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();
+  b.forEach((p,i)=>{let xx=x(p.t),yy=yBT(p.bt);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
+  ctx.stroke();
+  if(labels){
+    ctx.fillStyle=color;ctx.font="16px Arial";
+    b.forEach(p=>{let xx=x(p.t),yy=yBT(p.bt);ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-12)});
+  }
+  ctx.restore();
+}
+function drawRorLine(ctx,dataRows,x,yRor,color,width,alpha,dashed){
+  let rr=smoothRor(dataRows);
+  if(!rr.length)return;
+  ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=color;ctx.lineWidth=width;if(dashed)ctx.setLineDash([6,5]);ctx.beginPath();
+  rr.forEach((p,i)=>{let xx=x(p.t),yy=yRor(p.v);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
+  ctx.stroke();ctx.setLineDash([]);ctx.restore();
+}
+function drawPowerFan(ctx,dataRows,x,yPct){
+  let pp=dataRows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
+  if(pp.length){
+    ctx.strokeStyle="#444";ctx.lineWidth=2;ctx.beginPath();
+    pp.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.pw);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
+    ctx.stroke();ctx.fillStyle="#444";ctx.font="13px Arial";
+    pp.forEach(p=>ctx.fillText("P"+p.pw,x(p.t)+4,yPct(p.pw)+12));
+  }
+  let ff=dataRows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
+  if(ff.length){
+    ctx.strokeStyle="#999";ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();
+    ff.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.fan);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
+    ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#777";ctx.font="13px Arial";
+    ff.forEach(p=>ctx.fillText("F"+p.fan,x(p.t)+4,yPct(p.fan)-10));
+  }
 }
 
-// fan
-let ff=rows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
-if(ff.length){
-ctx.strokeStyle="#999";ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();
-ff.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.fan);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
-ctx.stroke();ctx.setLineDash([]);
-ctx.fillStyle="#777";ctx.font="13px Arial";
-ff.forEach(p=>ctx.fillText("F"+p.fan,x(p.t)+4,yPct(p.fan)-10));
+function profileObject(){return {name:document.getElementById("profileName").value||new Date().toISOString().slice(0,16),rows:rows,events:events,base:base}}
+function getProfiles(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||"{}")}catch(e){return {}}}
+function setProfiles(p){localStorage.setItem(STORE_KEY,JSON.stringify(p));refreshProfileList()}
+function saveProfile(){let obj=profileObject(),name=obj.name;document.getElementById("profileName").value=name;let p=getProfiles();p[name]=obj;setProfiles(p);alert("Saved: "+name)}
+function loadProfile(){
+  let name=document.getElementById("profileList").value;if(!name)return;
+  let p=getProfiles()[name];if(!p)return;
+  rows=(p.rows||[]).map(r=>({t:r.t,bt:r.bt,pw:r.pw,fan:r.fan}));
+  events=Object.assign({},p.events||{});
+  base=p.base||0;timeEl.innerText=fmt(base);updatePhaseDisplay();draw();
 }
-
-// events
-Object.keys(events).forEach(name=>{
-let t=events[name],xx=x(t);
-ctx.strokeStyle="#b36b00";ctx.lineWidth=2;
-ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
-ctx.fillStyle="#b36b00";ctx.beginPath();ctx.arc(xx,T+18,6,0,Math.PI*2);ctx.fill();
-ctx.save();ctx.translate(xx+8,T+35);ctx.rotate(Math.PI/2);
-ctx.font="15px Arial";ctx.fillText(name+" "+fmt(t),0,0);ctx.restore();
-});
-
-// labels
-ctx.fillStyle="#333";ctx.font="16px Arial";
-if(events.Charge!=null&&events.GC!=null)ctx.fillText("Dry",x(events.Charge)+8,T+18);
-if(events.GC!=null&&events.FC!=null)ctx.fillText("Maillard",x(events.GC)+8,T+18);
-if(events.FC!=null&&events.Drop!=null)ctx.fillText("Development",x(events.FC)+8,T+18);
-
-ctx.fillStyle="#000";ctx.font="14px Arial";
-ctx.fillText("RM500 v30 COMPLETE",L+10,T+H-15);
+function setReference(){
+  let name=document.getElementById("profileList").value;if(!name)return;
+  let p=getProfiles()[name];if(!p)return;
+  reference=p;referenceName=name;
+  localStorage.setItem(REF_KEY,JSON.stringify({name,p}));
+  document.getElementById("refStatus").innerText="Reference: "+name;draw();
 }
+function clearReference(){reference=null;referenceName="";localStorage.removeItem(REF_KEY);document.getElementById("refStatus").innerText="Reference: none";draw()}
+function deleteProfile(){let name=document.getElementById("profileList").value;if(!name)return;if(!confirm("Delete "+name+"?"))return;let p=getProfiles();delete p[name];setProfiles(p)}
+function refreshProfileList(){let p=getProfiles();let names=Object.keys(p).sort().reverse();document.getElementById("profileList").innerHTML=names.map(n=>'<option value="'+n+'">'+n+'</option>').join("")}
+function loadReference(){try{let r=JSON.parse(localStorage.getItem(REF_KEY)||"null");if(r&&r.p){reference=r.p;referenceName=r.name;document.getElementById("refStatus").innerText="Reference: "+referenceName}}catch(e){}}
 
-draw();
+refreshProfileList();loadReference();draw();
 </script>
 </body>
 </html>
