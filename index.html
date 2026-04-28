@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v33 Pro</title>
+<title>RM500 Logger v35 Pro</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -11,7 +11,7 @@ button{padding:10px;margin:3px;border-radius:6px;border:0;background:#222;color:
 button.green{background:#17633a}button.gray{background:#666}button.red{background:#9b1c1c}
 input,select{padding:8px;margin:3px;width:120px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:520px;border:2px solid #000;border-radius:10px;background:white}
+canvas{width:100%;height:520px;border:2px solid #000;border-radius:10px;background:white;cursor:pointer}
 .metric{display:inline-block;background:#eee;border-radius:8px;padding:8px;margin:4px;min-width:120px}
 .small{font-size:12px;color:#666}
 </style>
@@ -32,6 +32,7 @@ BT <input id="bt" type="number">
 Power <input id="pw" type="number">
 Fan <input id="fan" type="number">
 <button onclick="savePoint()">Save</button>
+<div class="small">Tip: click a BT point or BT number on the graph to delete that record.</div>
 </div>
 
 <div class="card">
@@ -63,11 +64,13 @@ Profile Name <input id="profileName" placeholder="profile name">
 <canvas id="c" width="1100" height="600"></canvas>
 
 <script>
-const STORE_KEY="rm500_v33_profiles";
-const REF_KEY="rm500_v33_reference";
+const STORE_KEY="rm500_v34_profiles";
+const REF_KEY="rm500_v34_reference";
 let rows=[],events={},reference=null,referenceName="";
 let running=false,startT=0,base=0;
+let hitTargets=[];
 const timeEl=document.getElementById("time");
+const canvas=document.getElementById("c");
 
 function now(){return running ? base + Math.floor((Date.now()-startT)/1000) : base}
 function fmt(s){s=Math.max(0,Math.floor(s));let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
@@ -83,7 +86,7 @@ function savePoint(){
   let pw=parseFloat(document.getElementById("pw").value);
   let fan=parseFloat(document.getElementById("fan").value);
   if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return;
-  rows.push({t,bt,pw,fan});
+  rows.push({t,bt,pw,fan,id:Date.now()+Math.random()});
   rows.sort((a,b)=>a.t-b.t);
   document.getElementById("bt").value="";
   document.getElementById("pw").value="";
@@ -128,6 +131,7 @@ function updatePhaseDisplay(){
 
 function draw(){
   updatePhaseDisplay();
+  hitTargets=[];
   let c=document.getElementById("c"),ctx=c.getContext("2d");
   ctx.clearRect(0,0,c.width,c.height);
   let L=85,R=85,T=25,B=85,W=c.width-L-R,H=c.height-T-B;
@@ -166,13 +170,14 @@ function draw(){
   ctx.fillStyle="#000";ctx.fillText("BT C",L+8,T+16);ctx.fillText("RoR",L+W+20,T+16);
 
   if(reference&&reference.rows){
-    drawBTLine(ctx,reference.rows,x,yBT,"#8091b3",5,.35,false);
+    drawBTLine(ctx,reference.rows,x,yBT,"#8091b3",5,.35,false,false);
     drawRorLine(ctx,reference.rows,x,yRor,"#8091b3",2,.45,true);
+    drawPowerFan(ctx,reference.rows,x,yPct,true);
   }
 
-  drawBTLine(ctx,rows,x,yBT,"#000",3,1,true);
+  drawBTLine(ctx,rows,x,yBT,"#000",3,1,true,true);
   drawRorLine(ctx,rows,x,yRor,"#777",2,1,true);
-  drawPowerFan(ctx,rows,x,yPct);
+  drawPowerFan(ctx,rows,x,yPct,false);
 
   Object.keys(events).forEach(name=>{
     let t=events[name],xx=x(t);
@@ -190,11 +195,11 @@ function draw(){
     ctx.fillText("Dev "+dev.toFixed(0)+"%",x(p.fc)+8,T+18);
   }
   ctx.fillStyle="#000";ctx.font="14px Arial";
-  ctx.fillText("RM500 v33 PRO",L+10,T+H-16);
-  ctx.fillText("Reference: blue / Current: black",L+180,T+H-16);
+  ctx.fillText("RM500 v35 PRO",L+10,T+H-16);
+  ctx.fillText("Click near stacked BT points/labels to delete one point at a time.",L+180,T+H-16);
 }
 
-function drawBTLine(ctx,dataRows,x,yBT,color,width,alpha,labels){
+function drawBTLine(ctx,dataRows,x,yBT,color,width,alpha,labels,clickable){
   let b=dataRows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
   if(!b.length)return;
   ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();
@@ -202,7 +207,22 @@ function drawBTLine(ctx,dataRows,x,yBT,color,width,alpha,labels){
   ctx.stroke();
   if(labels){
     ctx.fillStyle=color;ctx.font="16px Arial";
-    b.forEach(p=>{let xx=x(p.t),yy=yBT(p.bt);ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-12)});
+    b.forEach(p=>{
+      let xx=x(p.t),yy=yBT(p.bt);
+      ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();
+      let label=Math.round(p.bt)+"C";
+      ctx.fillText(label,xx+7,yy-12);
+      if(clickable){
+        hitTargets.push({
+          row:p,
+          cx:xx,
+          cy:yy,
+          labelX:xx+7,
+          labelY:yy-12,
+          radius:28
+        });
+      }
+    });
   }
   ctx.restore();
 }
@@ -213,22 +233,96 @@ function drawRorLine(ctx,dataRows,x,yRor,color,width,alpha,dashed){
   rr.forEach((p,i)=>{let xx=x(p.t),yy=yRor(p.v);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
   ctx.stroke();ctx.setLineDash([]);ctx.restore();
 }
-function drawPowerFan(ctx,dataRows,x,yPct){
-  let pp=dataRows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
-  if(pp.length){
-    ctx.strokeStyle="#444";ctx.lineWidth=2;ctx.beginPath();
-    pp.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.pw);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
-    ctx.stroke();ctx.fillStyle="#444";ctx.font="13px Arial";
-    pp.forEach(p=>ctx.fillText("P"+p.pw,x(p.t)+4,yPct(p.pw)+12));
-  }
-  let ff=dataRows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
-  if(ff.length){
-    ctx.strokeStyle="#999";ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();
-    ff.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.fan);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});
-    ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#777";ctx.font="13px Arial";
-    ff.forEach(p=>ctx.fillText("F"+p.fan,x(p.t)+4,yPct(p.fan)-10));
+
+function stepPath(ctx,points,x,y){
+  if(!points.length)return;
+  ctx.beginPath();
+  let prev=points[0];
+  ctx.moveTo(x(prev.t),y(prev.v));
+  for(let i=1;i<points.length;i++){
+    let cur=points[i];
+    ctx.lineTo(x(cur.t),y(prev.v)); // horizontal hold
+    ctx.lineTo(x(cur.t),y(cur.v));  // vertical change
+    prev=cur;
   }
 }
+
+function drawPowerFan(ctx,dataRows,x,yPct,isReference){
+  let alpha=isReference?.35:1;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+
+  let pp=dataRows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t).map(r=>({t:r.t,v:r.pw}));
+  if(pp.length){
+    ctx.strokeStyle=isReference?"#8091b3":"#444";
+    ctx.lineWidth=isReference?3:2;
+    stepPath(ctx,pp,x,yPct);
+    ctx.stroke();
+    if(!isReference){
+      ctx.fillStyle="#444";ctx.font="13px Arial";
+      pp.forEach(p=>ctx.fillText("P"+p.v,x(p.t)+4,yPct(p.v)+12));
+    }
+  }
+
+  let ff=dataRows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t).map(r=>({t:r.t,v:r.fan}));
+  if(ff.length){
+    ctx.strokeStyle=isReference?"#8091b3":"#999";
+    ctx.lineWidth=isReference?2:2;
+    ctx.setLineDash([4,4]);
+    stepPath(ctx,ff,x,yPct);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if(!isReference){
+      ctx.fillStyle="#777";ctx.font="13px Arial";
+      ff.forEach(p=>ctx.fillText("F"+p.v,x(p.t)+4,yPct(p.v)-10));
+    }
+  }
+
+  ctx.restore();
+}
+
+canvas.addEventListener("click",function(e){
+  let rect=canvas.getBoundingClientRect();
+  let sx=canvas.width/rect.width;
+  let sy=canvas.height/rect.height;
+  let mx=(e.clientX-rect.left)*sx;
+  let my=(e.clientY-rect.top)*sy;
+
+  // Find closest BT point or label area.
+  // This works even when points overlap at the same time/temp.
+  let candidates = hitTargets.map(h=>{
+    let dPoint = Math.hypot(mx-h.cx, my-h.cy);
+    let dLabel = Math.hypot(mx-h.labelX, my-h.labelY);
+    let d = Math.min(dPoint, dLabel);
+    return {h,d};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(!candidates.length)return;
+
+  candidates.sort((a,b)=>a.d-b.d);
+
+  // If stacked, delete the most recently added matching visible point first.
+  let target = candidates[0].h.row;
+  let sameSpot = candidates
+    .filter(o=>Math.abs(o.h.cx-candidates[0].h.cx)<2 && Math.abs(o.h.cy-candidates[0].h.cy)<2)
+    .map(o=>o.h.row);
+
+  if(sameSpot.length>1){
+    for(let i=rows.length-1;i>=0;i--){
+      if(sameSpot.includes(rows[i])){
+        target=rows[i];
+        break;
+      }
+    }
+  }
+
+  let label = "Delete BT " + target.bt + "C at " + fmt(target.t) + "?";
+  if(confirm(label)){
+    let idx=rows.indexOf(target);
+    if(idx>=0)rows.splice(idx,1);
+    draw();
+  }
+});
 
 function profileObject(){return {name:document.getElementById("profileName").value||new Date().toISOString().slice(0,16),rows:rows,events:events,base:base}}
 function getProfiles(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||"{}")}catch(e){return {}}}
@@ -237,7 +331,7 @@ function saveProfile(){let obj=profileObject(),name=obj.name;document.getElement
 function loadProfile(){
   let name=document.getElementById("profileList").value;if(!name)return;
   let p=getProfiles()[name];if(!p)return;
-  rows=(p.rows||[]).map(r=>({t:r.t,bt:r.bt,pw:r.pw,fan:r.fan}));
+  rows=(p.rows||[]).map(r=>({t:r.t,bt:r.bt,pw:r.pw,fan:r.fan,id:r.id||Date.now()+Math.random()}));
   events=Object.assign({},p.events||{});
   base=p.base||0;timeEl.innerText=fmt(base);updatePhaseDisplay();draw();
 }
