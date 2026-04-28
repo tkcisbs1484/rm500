@@ -3,18 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v29</title>
-
+<title>RM500 Logger v30 Complete</title>
 <style>
-body{margin:0;background:#f5f5f5;font-family:Arial}
+body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
 button{padding:10px;margin:3px;border-radius:6px;border:0;background:#222;color:#fff}
 input{padding:8px;margin:3px;width:80px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:480px;border:2px solid #000;border-radius:10px}
+canvas{width:100%;height:500px;border:2px solid #000;border-radius:10px;background:white}
 </style>
 </head>
-
 <body>
 
 <div class="card">
@@ -33,21 +31,27 @@ Fan <input id="fan">
 <button onclick="save()">Save</button>
 </div>
 
-<canvas id="c" width="1000" height="520"></canvas>
+<div class="card">
+<button onclick="eventSave('Charge')">Charge</button>
+<button onclick="eventSave('Bottom')">Bottom</button>
+<button onclick="eventSave('GC')">GC</button>
+<button onclick="eventSave('FC')">1st Crack</button>
+<button onclick="eventSave('Drop')">Drop</button>
+</div>
+
+<canvas id="c" width="1050" height="560"></canvas>
 
 <script>
-let rows=[],run=false,startT=0,base=0;
-
-const timeEl = document.getElementById("time");
+let rows=[],events={},run=false,startT=0,base=0;
+const timeEl=document.getElementById("time");
 
 function now(){return run?base+Math.floor((Date.now()-startT)/1000):base}
 function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
 
 function start(){if(run)return;run=true;startT=Date.now();loop()}
 function pause(){base=now();run=false}
-function reset(){base=0;run=false;rows=[];draw()}
-
-function shift(d){base=Math.max(0,now()+d);startT=Date.now()}
+function reset(){base=0;run=false;rows=[];events={};timeEl.innerText="00:00";draw()}
+function shift(d){base=Math.max(0,now()+d);startT=Date.now();timeEl.innerText=fmt(now());draw()}
 
 function loop(){
 timeEl.innerText=fmt(now());
@@ -58,72 +62,163 @@ if(run)requestAnimationFrame(loop);
 function save(){
 let t=now();
 let bt=parseFloat(document.getElementById("bt").value);
-if(isNaN(bt))return;
-rows.push({t,bt});
+let pw=parseFloat(document.getElementById("pw").value);
+let fan=parseFloat(document.getElementById("fan").value);
+if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return;
+rows.push({t,bt,pw,fan});
 rows.sort((a,b)=>a.t-b.t);
 document.getElementById("bt").value="";
+document.getElementById("pw").value="";
+document.getElementById("fan").value="";
+draw();
+}
+
+function eventSave(name){
+events[name]=now();
+draw();
+}
+
+function btRows(){
+return rows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
+}
+
+function rawRor(){
+let b=btRows(),out=[];
+for(let i=1;i<b.length;i++){
+let dt=(b[i].t-b[i-1].t)/60;
+if(dt>0)out.push({t:b[i].t,v:(b[i].bt-b[i-1].bt)/dt});
+}
+return out;
+}
+
+function smoothRor(){
+let r=rawRor(),out=[];
+for(let i=0;i<r.length;i++){
+let vals=[];
+for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++)vals.push(r[j].v);
+out.push({t:r[i].t,v:vals.reduce((a,b)=>a+b,0)/vals.length});
+}
+return out;
 }
 
 function draw(){
-let c=document.getElementById("c");
-let ctx=c.getContext("2d");
-
+let c=document.getElementById("c"),ctx=c.getContext("2d");
 ctx.clearRect(0,0,c.width,c.height);
 
-let L=80,T=20,W=840,H=420;
-let maxT=14*60;
-let maxTemp=230;
-
+let L=85,R=85,T=25,B=75,W=c.width-L-R,H=c.height-T-B;
+let maxT=14*60,maxTemp=230,maxRor=30;
 let x=t=>L+(t/maxT)*W;
-let y=v=>T+H-(v/maxTemp)*H;
+let yBT=v=>T+H-(v/maxTemp)*H;
+let yRor=v=>T+H-(Math.max(0,Math.min(maxRor,v))/maxRor)*H;
+let yPct=v=>T+H-(Math.max(0,Math.min(100,v))/100)*H;
 
-ctx.strokeStyle="#ddd";
-for(let temp=0;temp<=230;temp+=10){
-let yy=y(temp);
-ctx.beginPath();
-ctx.moveTo(L,yy);
-ctx.lineTo(L+W,yy);
-ctx.stroke();
-ctx.fillText(temp+"C",10,yy);
+ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+
+// phase bands
+if(events.Charge!=null&&events.GC!=null){
+ctx.fillStyle="rgba(242,214,162,.5)";
+ctx.fillRect(x(events.Charge),T,x(events.GC)-x(events.Charge),H);
+}
+if(events.GC!=null&&events.FC!=null){
+ctx.fillStyle="rgba(212,180,140,.5)";
+ctx.fillRect(x(events.GC),T,x(events.FC)-x(events.GC),H);
+}
+if(events.FC!=null&&events.Drop!=null){
+ctx.fillStyle="rgba(200,136,111,.5)";
+ctx.fillRect(x(events.FC),T,x(events.Drop)-x(events.FC),H);
 }
 
+// grid temp 5C, labels 10C
+ctx.font="16px Arial";
+ctx.textBaseline="middle";
+for(let temp=0;temp<=230;temp+=5){
+let yy=yBT(temp);
+ctx.strokeStyle=temp%10==0?"#ddd":"#eee";
+ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(L+W,yy);ctx.stroke();
+if(temp%10==0){ctx.fillStyle="#000";ctx.fillText(temp+"C",10,yy);}
+}
+
+// time 0-14min
 for(let m=0;m<=14;m++){
 let xx=x(m*60);
-ctx.beginPath();
-ctx.moveTo(xx,T);
-ctx.lineTo(xx,T+H);
-ctx.stroke();
-ctx.fillText(m+"m",xx-10,T+H+20);
+ctx.strokeStyle="#e5e5e5";
+ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
+ctx.fillStyle="#000";ctx.fillText(m+"m",xx-12,T+H+30);
 }
 
-ctx.strokeStyle="#000";
-ctx.beginPath();
-ctx.moveTo(L,T);
-ctx.lineTo(L,T+H);
-ctx.lineTo(L+W,T+H);
-ctx.stroke();
+// ROR axis
+for(let r=0;r<=30;r+=5){
+let yy=yRor(r);
+ctx.fillStyle="#000";ctx.fillText(r,L+W+20,yy);
+}
 
-if(rows.length>0){
-ctx.strokeStyle="black";
-ctx.beginPath();
-rows.forEach((r,i)=>{
-let xx=x(r.t),yy=y(r.bt);
-if(i==0)ctx.moveTo(xx,yy);
-else ctx.lineTo(xx,yy);
-});
-ctx.stroke();
+// axes
+ctx.strokeStyle="#000";ctx.lineWidth=2;
+ctx.beginPath();ctx.moveTo(L,T);ctx.lineTo(L,T+H);ctx.lineTo(L+W,T+H);ctx.lineTo(L+W,T);ctx.stroke();
+ctx.fillStyle="#000";ctx.fillText("BT C",L+8,T+16);ctx.fillText("RoR",L+W+20,T+16);
 
-rows.forEach(r=>{
-let xx=x(r.t),yy=y(r.bt);
-ctx.fillText(r.bt,xx+5,yy-5);
+// BT
+let b=btRows();
+if(b.length){
+ctx.strokeStyle="#000";ctx.lineWidth=3;ctx.beginPath();
+b.forEach((p,i)=>{let xx=x(p.t),yy=yBT(p.bt);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
+ctx.stroke();
+b.forEach(p=>{
+let xx=x(p.t),yy=yBT(p.bt);
+ctx.fillStyle="#000";ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();
+ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-12);
 });
 }
 
-ctx.fillText("RM500 v29 OK",L+10,T+20);
+// smooth ROR
+let rr=smoothRor();
+if(rr.length){
+ctx.strokeStyle="#777";ctx.lineWidth=2;ctx.setLineDash([6,5]);ctx.beginPath();
+rr.forEach((p,i)=>{let xx=x(p.t),yy=yRor(p.v);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
+ctx.stroke();ctx.setLineDash([]);
+}
+
+// power
+let pp=rows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
+if(pp.length){
+ctx.strokeStyle="#444";ctx.lineWidth=2;ctx.beginPath();
+pp.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.pw);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
+ctx.stroke();
+ctx.fillStyle="#444";ctx.font="13px Arial";
+pp.forEach(p=>ctx.fillText("P"+p.pw,x(p.t)+4,yPct(p.pw)+12));
+}
+
+// fan
+let ff=rows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
+if(ff.length){
+ctx.strokeStyle="#999";ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();
+ff.forEach((p,i)=>{let xx=x(p.t),yy=yPct(p.fan);if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});
+ctx.stroke();ctx.setLineDash([]);
+ctx.fillStyle="#777";ctx.font="13px Arial";
+ff.forEach(p=>ctx.fillText("F"+p.fan,x(p.t)+4,yPct(p.fan)-10));
+}
+
+// events
+Object.keys(events).forEach(name=>{
+let t=events[name],xx=x(t);
+ctx.strokeStyle="#b36b00";ctx.lineWidth=2;
+ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
+ctx.fillStyle="#b36b00";ctx.beginPath();ctx.arc(xx,T+18,6,0,Math.PI*2);ctx.fill();
+ctx.save();ctx.translate(xx+8,T+35);ctx.rotate(Math.PI/2);
+ctx.font="15px Arial";ctx.fillText(name+" "+fmt(t),0,0);ctx.restore();
+});
+
+// labels
+ctx.fillStyle="#333";ctx.font="16px Arial";
+if(events.Charge!=null&&events.GC!=null)ctx.fillText("Dry",x(events.Charge)+8,T+18);
+if(events.GC!=null&&events.FC!=null)ctx.fillText("Maillard",x(events.GC)+8,T+18);
+if(events.FC!=null&&events.Drop!=null)ctx.fillText("Development",x(events.FC)+8,T+18);
+
+ctx.fillStyle="#000";ctx.font="14px Arial";
+ctx.fillText("RM500 v30 COMPLETE",L+10,T+H-15);
 }
 
 draw();
 </script>
-
 </body>
 </html>
