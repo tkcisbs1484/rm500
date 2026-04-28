@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v35 Pro</title>
+<title>RM500 Logger v36 Layout</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -12,6 +12,7 @@ button.green{background:#17633a}button.gray{background:#666}button.red{backgroun
 input,select{padding:8px;margin:3px;width:120px}
 #time{font-size:42px;text-align:center}
 canvas{width:100%;height:520px;border:2px solid #000;border-radius:10px;background:white;cursor:pointer}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}.grid3 .card{margin:0}.wide{width:160px}@media(max-width:800px){.grid3{grid-template-columns:1fr}.wide{width:120px}}
 .metric{display:inline-block;background:#eee;border-radius:8px;padding:8px;margin:4px;min-width:120px}
 .small{font-size:12px;color:#666}
 </style>
@@ -19,35 +20,38 @@ canvas{width:100%;height:520px;border:2px solid #000;border-radius:10px;backgrou
 <body>
 
 <div class="card">
-<div id="time">0:00</div>
-<button onclick="startTimer()">Timer Start</button>
-<button onclick="pauseTimer()">Pause</button>
-<button onclick="resetAll()">Reset</button>
-<button onclick="shiftTime(-10)">-10s</button>
-<button onclick="shiftTime(10)">+10s</button>
+Date <input id="roastDate" type="date" class="wide">
+Temp <input id="airTemp" type="number" placeholder="C">
+Humidity <input id="humidity" type="number" placeholder="%">
+Bean <input id="beanType" class="wide" placeholder="bean type">
+Batch <input id="batchSize" type="number" placeholder="g">
 </div>
 
-<div class="card">
-BT <input id="bt" type="number">
-Power <input id="pw" type="number">
-Fan <input id="fan" type="number">
-<button onclick="savePoint()">Save</button>
-<div class="small">Tip: click a BT point or BT number on the graph to delete that record.</div>
-</div>
+<div class="grid3">
+  <div class="card">
+    <div id="time">0:00</div>
+    <button onclick="startTimer()">Timer Start</button>
+    <button onclick="pauseTimer()">Pause</button>
+    <button onclick="resetAll()">Reset</button>
+    <button onclick="shiftTime(-10)">-10s</button>
+    <button onclick="shiftTime(10)">+10s</button>
+  </div>
 
-<div class="card">
-<button onclick="markEvent('Start')">Start</button>
-<button onclick="markEvent('Bottom')">Bottom</button>
-<button onclick="markEvent('GC')">GC</button>
-<button onclick="markEvent('FC')">1st Crack</button>
-<button onclick="markEvent('Drop')">Drop</button>
-</div>
+  <div class="card">
+    BT <input id="bt" type="number"><br>
+    Power <input id="pw" type="number"><br>
+    Fan <input id="fan" type="number"><br>
+    <button onclick="savePoint()">Save</button>
+    <div class="small">Click stacked BT points/labels to delete one point.</div>
+  </div>
 
-<div class="card">
-<span class="metric">Dry <b id="dryPct">-</b></span>
-<span class="metric">Maillard <b id="maiPct">-</b></span>
-<span class="metric">Development <b id="devPct">-</b></span>
-<span class="metric">DTR <b id="dtrPct">-</b></span>
+  <div class="card">
+    <button onclick="markEvent('Start')">Start</button>
+    <button onclick="markEvent('Bottom')">Bottom</button>
+    <button onclick="markEvent('GC')">GC</button>
+    <button onclick="markEvent('FC')">1st Crack</button>
+    <button onclick="markEvent('Drop')">Drop</button>
+  </div>
 </div>
 
 <div class="card">
@@ -62,6 +66,14 @@ Profile Name <input id="profileName" placeholder="profile name">
 </div>
 
 <canvas id="c" width="1100" height="600"></canvas>
+
+<div class="card">
+<span class="metric">Dry <b id="dryPct">-</b></span>
+<span class="metric">Maillard <b id="maiPct">-</b></span>
+<span class="metric">Development <b id="devPct">-</b></span>
+<span class="metric">DTR <b id="dtrPct">-</b></span>
+</div>
+
 
 <script>
 const STORE_KEY="rm500_v34_profiles";
@@ -195,8 +207,20 @@ function draw(){
     ctx.fillText("Dev "+dev.toFixed(0)+"%",x(p.fc)+8,T+18);
   }
   ctx.fillStyle="#000";ctx.font="14px Arial";
-  ctx.fillText("RM500 v35 PRO",L+10,T+H-16);
+  ctx.fillText("RM500 v36 LAYOUT",L+10,T+H-16);
   ctx.fillText("Click near stacked BT points/labels to delete one point at a time.",L+180,T+H-16);
+  let metaText=[
+    document.getElementById("roastDate").value,
+    document.getElementById("beanType").value,
+    document.getElementById("batchSize").value?document.getElementById("batchSize").value+"g":"",
+    document.getElementById("airTemp").value?document.getElementById("airTemp").value+"C":"",
+    document.getElementById("humidity").value?document.getElementById("humidity").value+"%RH":""
+  ].filter(Boolean).join(" / ");
+  if(metaText){
+    ctx.fillStyle="#000";
+    ctx.font="14px Arial";
+    ctx.fillText(metaText,L+10,T+H-36);
+  }
 }
 
 function drawBTLine(ctx,dataRows,x,yBT,color,width,alpha,labels,clickable){
@@ -324,7 +348,19 @@ canvas.addEventListener("click",function(e){
   }
 });
 
-function profileObject(){return {name:document.getElementById("profileName").value||new Date().toISOString().slice(0,16),rows:rows,events:events,base:base}}
+function profileObject(){return {
+  name:document.getElementById("profileName").value||new Date().toISOString().slice(0,16),
+  rows:rows,
+  events:events,
+  base:base,
+  meta:{
+    roastDate:document.getElementById("roastDate").value,
+    airTemp:document.getElementById("airTemp").value,
+    humidity:document.getElementById("humidity").value,
+    beanType:document.getElementById("beanType").value,
+    batchSize:document.getElementById("batchSize").value
+  }
+}}
 function getProfiles(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||"{}")}catch(e){return {}}}
 function setProfiles(p){localStorage.setItem(STORE_KEY,JSON.stringify(p));refreshProfileList()}
 function saveProfile(){let obj=profileObject(),name=obj.name;document.getElementById("profileName").value=name;let p=getProfiles();p[name]=obj;setProfiles(p);alert("Saved: "+name)}
@@ -333,7 +369,15 @@ function loadProfile(){
   let p=getProfiles()[name];if(!p)return;
   rows=(p.rows||[]).map(r=>({t:r.t,bt:r.bt,pw:r.pw,fan:r.fan,id:r.id||Date.now()+Math.random()}));
   events=Object.assign({},p.events||{});
-  base=p.base||0;timeEl.innerText=fmt(base);updatePhaseDisplay();draw();
+  base=p.base||0;
+  if(p.meta){
+    document.getElementById("roastDate").value=p.meta.roastDate||"";
+    document.getElementById("airTemp").value=p.meta.airTemp||"";
+    document.getElementById("humidity").value=p.meta.humidity||"";
+    document.getElementById("beanType").value=p.meta.beanType||"";
+    document.getElementById("batchSize").value=p.meta.batchSize||"";
+  }
+  timeEl.innerText=fmt(base);updatePhaseDisplay();draw();
 }
 function setReference(){
   let name=document.getElementById("profileList").value;if(!name)return;
