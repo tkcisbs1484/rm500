@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RM500 Graph Main v24 EN</title>
+
+<style>
+body{margin:0;background:#f5f5f5;font-family:-apple-system,Arial;color:#222}
+header{background:#222;color:#fff;padding:16px}
+h1{margin:0;font-size:20px}
+.card{background:#fff;margin:10px;padding:12px;border-radius:12px;border:1px solid #ddd}
+button{padding:10px;margin:3px;border-radius:8px;border:0;background:#222;color:#fff}
+input,select{padding:8px;margin:3px;border:1px solid #ccc;border-radius:6px}
+#time{font-size:42px;text-align:center}
+svg{width:100%;height:420px;background:#fff;border:1px solid #ddd;border-radius:10px}
+.pill{display:inline-block;background:#eee;border-radius:999px;padding:4px 8px;font-size:12px;margin:2px}
+.metric{display:inline-block;min-width:120px;background:#f3f3f3;border-radius:10px;padding:8px;margin:4px}
+.log{max-height:150px;overflow:auto;background:#fafafa;padding:8px;border-radius:8px}
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>RM500 Roast Logger</h1>
+</header>
+
+<div class="card">
+Bean <input id="bean">
+Dose <input id="dose">
+Charge <input id="charge">
+<br>Profile <input id="pname">
+</div>
+
+<div class="card">
+<div id="time">00:00</div>
+<button onclick="start()">Start</button>
+<button onclick="pause()">Pause</button>
+<button onclick="reset()">Reset</button>
+<button onclick="shift(-10)">-10s</button>
+<button onclick="shift(10)">+10s</button>
+</div>
+
+<div class="card">
+BT <input id="bt">
+Power <input id="pw">
+Fan <input id="fan">
+<button onclick="save()">Save</button>
+</div>
+
+<div class="card">
+<button onclick="eventSave('Charge')">Charge</button>
+<button onclick="eventSave('Bottom')">Bottom</button>
+<button onclick="eventSave('GC')">GC</button>
+<button onclick="eventSave('FC')">1st Crack</button>
+<button onclick="eventSave('Drop')">Drop</button>
+</div>
+
+<div class="card">
+<span class="pill">BT</span>
+<span class="pill">RoR</span>
+<span class="pill">Power</span>
+<span class="pill">Fan</span>
+<svg id="g" viewBox="0 0 760 420"></svg>
+</div>
+
+<div class="card">
+<span class="metric">Dry <b id="dry">-</b></span>
+<span class="metric">Maillard <b id="mai">-</b></span>
+<span class="metric">Dev <b id="dev">-</b></span>
+<span class="metric">DTR <b id="dtr">-</b></span>
+</div>
+
+<div class="card">
+<div class="log" id="log"></div>
+</div>
+
+<script>
+let rows=[],run=false,startT=0,base=0
+
+function now(){return run?base+Math.floor((Date.now()-startT)/1000):base}
+function fmt(s){let m=Math.floor(s/60),sec=s%60;return String(m).padStart(2,'0')+":"+String(sec).padStart(2,'0')}
+
+function start(){if(run)return;run=true;startT=Date.now();loop()}
+function pause(){base=now();run=false}
+function reset(){base=0;run=false;rows=[];draw()}
+
+function shift(d){base=Math.max(0,now()+d);startT=Date.now()}
+
+function loop(){
+time.innerText=fmt(now())
+if(run)requestAnimationFrame(loop)
+draw()
+update()
+}
+
+function save(){
+let t=now()
+let bt=parseFloat(btEl.value)
+let pw=parseFloat(pwEl.value)
+let fan=parseFloat(fanEl.value)
+if(isNaN(bt)&&isNaN(pw)&&isNaN(fan))return
+rows.push({t,bt,pw,fan})
+btEl.value="";pwEl.value="";fanEl.value=""
+}
+
+function eventSave(name){
+rows.push({t:now(),ev:name})
+}
+
+const btEl=bt
+const pwEl=pw
+const fanEl=fan
+const time=document.getElementById("time")
+
+function ror(i){
+if(i<1)return null
+let a=rows[i],b=rows[i-1]
+if(isNaN(a.bt)||isNaN(b.bt))return null
+let dt=(a.t-b.t)/60
+if(dt<=0)return null
+return (a.bt-b.bt)/dt
+}
+
+function smooth(i){
+let vals=[]
+for(let j=i-1;j<=i+1;j++){
+if(j>=0&&j<rows.length){
+let r=ror(j)
+if(r!==null)vals.push(r)
+}}
+if(!vals.length)return null
+return vals.reduce((a,b)=>a+b,0)/vals.length
+}
+
+function draw(){
+let c=g,ctx=c.getContext("2d")
+ctx.clearRect(0,0,c.width,c.height)
+
+if(rows.length<2)return
+
+let maxT=Math.max(...rows.map(d=>d.t),600)
+
+let x=t=>t/maxT*c.width
+let yBT=v=>c.height-(v/230*c.height)
+let yROR=v=>c.height-(Math.min(30,v)/30*c.height)
+let yP=v=>c.height-(v/100*c.height)
+
+// BT
+ctx.beginPath()
+rows.forEach((d,i)=>{
+if(isNaN(d.bt))return
+if(i==0)ctx.moveTo(x(d.t),yBT(d.bt))
+else ctx.lineTo(x(d.t),yBT(d.bt))
+})
+ctx.stroke()
+
+// labels
+rows.forEach(d=>{
+if(!isNaN(d.bt)){
+ctx.fillText(Math.round(d.bt),x(d.t)+4,yBT(d.bt)-4)
+}
+})
+
+// ROR
+ctx.beginPath()
+rows.forEach((d,i)=>{
+let r=smooth(i)
+if(r===null)return
+if(i==0)ctx.moveTo(x(d.t),yROR(r))
+else ctx.lineTo(x(d.t),yROR(r))
+})
+ctx.setLineDash([5,5])
+ctx.stroke()
+ctx.setLineDash([])
+
+// Power
+ctx.beginPath()
+rows.forEach((d,i)=>{
+if(isNaN(d.pw))return
+if(i==0)ctx.moveTo(x(d.t),yP(d.pw))
+else ctx.lineTo(x(d.t),yP(d.pw))
+})
+ctx.strokeStyle="#444"
+ctx.stroke()
+ctx.strokeStyle="#000"
+
+// Fan
+ctx.beginPath()
+rows.forEach((d,i)=>{
+if(isNaN(d.fan))return
+if(i==0)ctx.moveTo(x(d.t),yP(d.fan))
+else ctx.lineTo(x(d.t),yP(d.fan))
+})
+ctx.setLineDash([3,3])
+ctx.strokeStyle="#999"
+ctx.stroke()
+ctx.setLineDash([])
+ctx.strokeStyle="#000"
+}
+
+function update(){
+log.innerHTML=rows.map(r=>fmt(r.t)+" BT:"+ (r.bt||"-")+" ROR:"+ (smooth(rows.indexOf(r))||"-")).join("<br>")
+}
+</script>
+
+</body>
+</html>
