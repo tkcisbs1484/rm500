@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger Base v2</title>
+<title>RM500 Logger Base v3</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -20,6 +20,8 @@ canvas{width:100%;height:430px;background:white;border:2px solid #000;border-rad
   <button onclick="startTimer()">Timer Start</button>
   <button onclick="stopTimer()">Stop</button>
   <button onclick="clearTimer()">Clear Timer</button>
+  <button onclick="shiftTime(-10)">-10s</button>
+  <button onclick="shiftTime(10)">+10s</button>
 </div>
 
 <div class="card">
@@ -75,6 +77,13 @@ function clearTimer(){
   draw();
 }
 
+function shiftTime(delta){
+  baseSec=Math.max(0,nowSec()+delta);
+  if(running)startMs=Date.now();
+  timeEl.innerText=fmt(baseSec);
+  draw();
+}
+
 function loop(){
   timeEl.innerText=fmt(nowSec());
   draw();
@@ -92,30 +101,53 @@ function savePoint(){
   data.push({t,bt,power,fan});
   data.sort((a,b)=>a.t-b.t);
 
-  document.getElementById("bt").value="";
-  document.getElementById("power").value="";
-  document.getElementById("fan").value="";
-
+  // 入力値は消さず、そのまま残す
   draw();
 }
 
-function stepLine(points, valueKey, x, y){
+function btData(){
+  return data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
+}
+
+function rawRor(){
+  let b=btData();
+  let out=[];
+  for(let i=1;i<b.length;i++){
+    let dt=(b[i].t-b[i-1].t)/60;
+    if(dt<=0)continue;
+    let r=(b[i].bt-b[i-1].bt)/dt;
+    out.push({t:b[i].t,ror:r});
+  }
+  return out;
+}
+
+function smoothRor(){
+  let r=rawRor();
+  let out=[];
+  for(let i=0;i<r.length;i++){
+    let vals=[];
+    for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++){
+      vals.push(r[j].ror);
+    }
+    out.push({
+      t:r[i].t,
+      ror:vals.reduce((a,b)=>a+b,0)/vals.length
+    });
+  }
+  return out;
+}
+
+function stepLine(points,valueKey,x,y){
   if(points.length===0)return;
 
   ctx.beginPath();
-
   let prev=points[0];
-  ctx.moveTo(x(prev.t), y(prev[valueKey]));
+  ctx.moveTo(x(prev.t),y(prev[valueKey]));
 
   for(let i=1;i<points.length;i++){
     let cur=points[i];
-
-    // horizontal hold
-    ctx.lineTo(x(cur.t), y(prev[valueKey]));
-
-    // vertical change
-    ctx.lineTo(x(cur.t), y(cur[valueKey]));
-
+    ctx.lineTo(x(cur.t),y(prev[valueKey]));
+    ctx.lineTo(x(cur.t),y(cur[valueKey]));
     prev=cur;
   }
 
@@ -126,7 +158,7 @@ function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   let L=70;
-  let R=30;
+  let R=55;
   let T=25;
   let B=55;
 
@@ -135,13 +167,15 @@ function draw(){
 
   let maxTime=14*60;
   let maxTemp=230;
+  let maxRor=30;
 
   let x=sec=>L+(sec/maxTime)*W;
   let yTemp=temp=>T+H-(temp/maxTemp)*H;
+  let yRor=ror=>T+H-(Math.max(0,Math.min(maxRor,ror))/maxRor)*H;
 
-  // Power/Fan lower half only
-  let pfTop=T+H/2;
-  let pfH=H/2;
+  // Power/Fan lower 1/3 only
+  let pfTop=T+H*(2/3);
+  let pfH=H/3;
   let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
 
   ctx.fillStyle="#fff";
@@ -153,6 +187,7 @@ function draw(){
   // temp grid 0-230C, 5C steps
   for(let temp=0;temp<=230;temp+=5){
     let yy=yTemp(temp);
+
     ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
     ctx.lineWidth=1;
     ctx.beginPath();
@@ -169,6 +204,7 @@ function draw(){
   // time grid 0-14min, 30s steps
   for(let sec=0;sec<=maxTime;sec+=30){
     let xx=x(sec);
+
     ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f0f0f0";
     ctx.beginPath();
     ctx.moveTo(xx,T);
@@ -181,8 +217,8 @@ function draw(){
     }
   }
 
-  // lower half guide
-  ctx.strokeStyle="rgba(0,0,0,0.25)";
+  // lower 1/3 guide
+  ctx.strokeStyle="rgba(0,0,0,0.3)";
   ctx.setLineDash([4,4]);
   ctx.beginPath();
   ctx.moveTo(L,pfTop);
@@ -200,19 +236,29 @@ function draw(){
   ctx.moveTo(L,T);
   ctx.lineTo(L,T+H);
   ctx.lineTo(L+W,T+H);
+  ctx.lineTo(L+W,T);
   ctx.stroke();
 
-  // BT
-  let btData=data.filter(d=>!isNaN(d.bt));
+  // RoR right scale
+  ctx.fillStyle="#666";
+  ctx.font="12px Arial";
+  for(let r=0;r<=30;r+=5){
+    let yy=yRor(r);
+    ctx.fillText(r,L+W+14,yy);
+  }
+  ctx.fillText("RoR",L+W+14,T+14);
 
-  if(btData.length>0){
+  // BT line
+  let b=btData();
+  if(b.length>0){
     ctx.strokeStyle="#000";
     ctx.lineWidth=3;
     ctx.beginPath();
 
-    btData.forEach((d,i)=>{
+    b.forEach((d,i)=>{
       let xx=x(d.t);
       let yy=yTemp(d.bt);
+
       if(i===0)ctx.moveTo(xx,yy);
       else ctx.lineTo(xx,yy);
     });
@@ -222,7 +268,7 @@ function draw(){
     ctx.fillStyle="#000";
     ctx.font="14px Arial";
 
-    btData.forEach(d=>{
+    b.forEach(d=>{
       let xx=x(d.t);
       let yy=yTemp(d.bt);
 
@@ -234,8 +280,29 @@ function draw(){
     });
   }
 
-  // Power step line: red, 50%
-  let powerData=data.filter(d=>!isNaN(d.power));
+  // RoR smooth line orange 50%
+  let rr=smoothRor();
+  if(rr.length>0){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="orange";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+
+    rr.forEach((d,i)=>{
+      let xx=x(d.t);
+      let yy=yRor(d.ror);
+
+      if(i===0)ctx.moveTo(xx,yy);
+      else ctx.lineTo(xx,yy);
+    });
+
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Power step line: red, 50%, lower 1/3
+  let powerData=data.filter(d=>!isNaN(d.power)).sort((a,b)=>a.t-b.t);
 
   if(powerData.length>0){
     ctx.save();
@@ -245,14 +312,14 @@ function draw(){
     stepLine(powerData,"power",x,yPF);
     ctx.restore();
 
-    ctx.fillStyle="rgba(255,0,0,0.7)";
+    ctx.fillStyle="rgba(255,0,0,0.75)";
     powerData.forEach(d=>{
       ctx.fillText("P"+d.power,x(d.t)+4,yPF(d.power)+12);
     });
   }
 
-  // Fan step line: blue, 50%
-  let fanData=data.filter(d=>!isNaN(d.fan));
+  // Fan step line: blue, 50%, lower 1/3
+  let fanData=data.filter(d=>!isNaN(d.fan)).sort((a,b)=>a.t-b.t);
 
   if(fanData.length>0){
     ctx.save();
@@ -262,7 +329,7 @@ function draw(){
     stepLine(fanData,"fan",x,yPF);
     ctx.restore();
 
-    ctx.fillStyle="rgba(0,0,255,0.7)";
+    ctx.fillStyle="rgba(0,0,255,0.75)";
     fanData.forEach(d=>{
       ctx.fillText("F"+d.fan,x(d.t)+4,yPF(d.fan)-10);
     });
@@ -271,7 +338,7 @@ function draw(){
   // legend
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("BT: black / Power: red step 50% / Fan: blue step 50%",L+10,T+18);
+  ctx.fillText("BT: black / RoR: orange 50% / Power: red step 50% / Fan: blue step 50%",L+10,T+18);
 }
 
 draw();
@@ -279,5 +346,3 @@ draw();
 
 </body>
 </html>
-
-</body>
