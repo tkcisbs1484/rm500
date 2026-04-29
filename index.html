@@ -3,69 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger Base v1</title>
+<title>RM500 Logger Base v2</title>
 <style>
-body{
-  margin:0;
-  background:#f5f5f5;
-  font-family:Arial;
-  color:#222;
-}
-.card{
-  background:#fff;
-  margin:10px;
-  padding:12px;
-  border-radius:10px;
-  border:1px solid #ddd;
-}
-button{
-  padding:10px 14px;
-  margin:4px;
-  border:0;
-  border-radius:8px;
-  background:#222;
-  color:#fff;
-  font-size:15px;
-}
-input{
-  padding:8px;
-  margin:4px;
-  width:90px;
-  font-size:15px;
-}
-#time{
-  font-size:44px;
-  text-align:center;
-  font-weight:bold;
-}
-canvas{
-  width:100%;
-  height:430px;
-  background:white;
-  border:2px solid #000;
-  border-radius:10px;
-}
+body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
+.card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
+button{padding:10px 14px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff;font-size:15px}
+input{padding:8px;margin:4px;width:90px;font-size:15px}
+#time{font-size:44px;text-align:center;font-weight:bold}
+canvas{width:100%;height:430px;background:white;border:2px solid #000;border-radius:10px}
 </style>
 </head>
-
 <body>
 
 <div class="card">
   <div id="time">0:00</div>
   <button onclick="startTimer()">Timer Start</button>
   <button onclick="stopTimer()">Stop</button>
+  <button onclick="clearTimer()">Clear Timer</button>
 </div>
 
 <div class="card">
-  BT Temp
-  <input id="bt" type="number" step="1">
-
-  Power
-  <input id="power" type="number" step="5">
-
-  Fan
-  <input id="fan" type="number" step="5">
-
+  BT Temp <input id="bt" type="number" step="1">
+  Power <input id="power" type="number" step="5">
+  Fan <input id="fan" type="number" step="5">
   <button onclick="savePoint()">Save</button>
 </div>
 
@@ -74,231 +34,244 @@ canvas{
 </div>
 
 <script>
-let running = false;
-let startMs = 0;
-let baseSec = 0;
-let data = [];
+let running=false;
+let startMs=0;
+let baseSec=0;
+let data=[];
 
-const timeEl = document.getElementById("time");
-const canvas = document.getElementById("graph");
-const ctx = canvas.getContext("2d");
+const timeEl=document.getElementById("time");
+const canvas=document.getElementById("graph");
+const ctx=canvas.getContext("2d");
 
 function nowSec(){
-  if(running){
-    return baseSec + Math.floor((Date.now() - startMs) / 1000);
-  }
-  return baseSec;
+  return running ? baseSec + Math.floor((Date.now()-startMs)/1000) : baseSec;
 }
 
 function fmt(sec){
-  sec = Math.max(0, Math.floor(sec));
-  let m = Math.floor(sec / 60);
-  let s = sec % 60;
-  return m + ":" + String(s).padStart(2, "0");
+  sec=Math.max(0,Math.floor(sec));
+  let m=Math.floor(sec/60);
+  let s=sec%60;
+  return m+":"+String(s).padStart(2,"0");
 }
 
 function startTimer(){
-  if(running) return;
-  running = true;
-  startMs = Date.now();
+  if(running)return;
+  running=true;
+  startMs=Date.now();
   loop();
 }
 
 function stopTimer(){
-  baseSec = nowSec();
-  running = false;
-  timeEl.innerText = fmt(baseSec);
+  baseSec=nowSec();
+  running=false;
+  timeEl.innerText=fmt(baseSec);
+  draw();
+}
+
+function clearTimer(){
+  baseSec=0;
+  running=false;
+  timeEl.innerText="0:00";
   draw();
 }
 
 function loop(){
-  timeEl.innerText = fmt(nowSec());
+  timeEl.innerText=fmt(nowSec());
   draw();
-
-  if(running){
-    requestAnimationFrame(loop);
-  }
+  if(running)requestAnimationFrame(loop);
 }
 
 function savePoint(){
-  let t = nowSec();
+  let t=nowSec();
+  let bt=parseFloat(document.getElementById("bt").value);
+  let power=parseFloat(document.getElementById("power").value);
+  let fan=parseFloat(document.getElementById("fan").value);
 
-  let bt = parseFloat(document.getElementById("bt").value);
-  let power = parseFloat(document.getElementById("power").value);
-  let fan = parseFloat(document.getElementById("fan").value);
+  if(isNaN(bt)&&isNaN(power)&&isNaN(fan))return;
 
-  if(isNaN(bt) && isNaN(power) && isNaN(fan)){
-    return;
-  }
-
-  data.push({
-    t: t,
-    bt: bt,
-    power: power,
-    fan: fan
-  });
-
+  data.push({t,bt,power,fan});
   data.sort((a,b)=>a.t-b.t);
 
-  document.getElementById("bt").value = "";
-  document.getElementById("power").value = "";
-  document.getElementById("fan").value = "";
+  document.getElementById("bt").value="";
+  document.getElementById("power").value="";
+  document.getElementById("fan").value="";
 
   draw();
+}
+
+function stepLine(points, valueKey, x, y){
+  if(points.length===0)return;
+
+  ctx.beginPath();
+
+  let prev=points[0];
+  ctx.moveTo(x(prev.t), y(prev[valueKey]));
+
+  for(let i=1;i<points.length;i++){
+    let cur=points[i];
+
+    // horizontal hold
+    ctx.lineTo(x(cur.t), y(prev[valueKey]));
+
+    // vertical change
+    ctx.lineTo(x(cur.t), y(cur[valueKey]));
+
+    prev=cur;
+  }
+
+  ctx.stroke();
 }
 
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  let L = 70;
-  let R = 30;
-  let T = 25;
-  let B = 55;
+  let L=70;
+  let R=30;
+  let T=25;
+  let B=55;
 
-  let W = canvas.width - L - R;
-  let H = canvas.height - T - B;
+  let W=canvas.width-L-R;
+  let H=canvas.height-T-B;
 
-  let maxTime = 14 * 60;
-  let maxTemp = 230;
+  let maxTime=14*60;
+  let maxTemp=230;
 
-  let x = sec => L + (sec / maxTime) * W;
-  let yTemp = temp => T + H - (temp / maxTemp) * H;
+  let x=sec=>L+(sec/maxTime)*W;
+  let yTemp=temp=>T+H-(temp/maxTemp)*H;
 
-  ctx.fillStyle = "#fff";
+  // Power/Fan lower half only
+  let pfTop=T+H/2;
+  let pfH=H/2;
+  let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
+
+  ctx.fillStyle="#fff";
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // horizontal temp grid 0-230 C, 5 C steps
-  ctx.font = "13px Arial";
-  ctx.textBaseline = "middle";
+  ctx.font="13px Arial";
+  ctx.textBaseline="middle";
 
-  for(let temp=0; temp<=230; temp+=5){
-    let yy = yTemp(temp);
-
-    ctx.strokeStyle = temp % 10 === 0 ? "#ddd" : "#eee";
-    ctx.lineWidth = 1;
+  // temp grid 0-230C, 5C steps
+  for(let temp=0;temp<=230;temp+=5){
+    let yy=yTemp(temp);
+    ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
+    ctx.lineWidth=1;
     ctx.beginPath();
-    ctx.moveTo(L, yy);
-    ctx.lineTo(L+W, yy);
+    ctx.moveTo(L,yy);
+    ctx.lineTo(L+W,yy);
     ctx.stroke();
 
-    if(temp % 10 === 0){
-      ctx.fillStyle = "#000";
-      ctx.fillText(temp + "C", 10, yy);
+    if(temp%10===0){
+      ctx.fillStyle="#000";
+      ctx.fillText(temp+"C",10,yy);
     }
   }
 
-  // vertical time grid 0-14 min, 30 sec steps
-  for(let sec=0; sec<=maxTime; sec+=30){
-    let xx = x(sec);
-
-    ctx.strokeStyle = sec % 60 === 0 ? "#ddd" : "#f0f0f0";
+  // time grid 0-14min, 30s steps
+  for(let sec=0;sec<=maxTime;sec+=30){
+    let xx=x(sec);
+    ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f0f0f0";
     ctx.beginPath();
-    ctx.moveTo(xx, T);
-    ctx.lineTo(xx, T+H);
+    ctx.moveTo(xx,T);
+    ctx.lineTo(xx,T+H);
     ctx.stroke();
 
-    if(sec % 60 === 0){
-      ctx.fillStyle = "#000";
-      ctx.fillText((sec/60) + "m", xx-10, T+H+25);
+    if(sec%60===0){
+      ctx.fillStyle="#000";
+      ctx.fillText((sec/60)+"m",xx-10,T+H+25);
     }
   }
+
+  // lower half guide
+  ctx.strokeStyle="rgba(0,0,0,0.25)";
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.moveTo(L,pfTop);
+  ctx.lineTo(L+W,pfTop);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle="#666";
+  ctx.fillText("Power/Fan zone",L+8,pfTop+14);
 
   // axis
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle="#000";
+  ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.moveTo(L, T);
-  ctx.lineTo(L, T+H);
-  ctx.lineTo(L+W, T+H);
+  ctx.moveTo(L,T);
+  ctx.lineTo(L,T+H);
+  ctx.lineTo(L+W,T+H);
   ctx.stroke();
 
-  // BT line
-  let btData = data.filter(d => !isNaN(d.bt));
+  // BT
+  let btData=data.filter(d=>!isNaN(d.bt));
 
-  if(btData.length > 0){
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 3;
+  if(btData.length>0){
+    ctx.strokeStyle="#000";
+    ctx.lineWidth=3;
     ctx.beginPath();
 
     btData.forEach((d,i)=>{
-      let xx = x(d.t);
-      let yy = yTemp(d.bt);
-
-      if(i === 0){
-        ctx.moveTo(xx, yy);
-      }else{
-        ctx.lineTo(xx, yy);
-      }
+      let xx=x(d.t);
+      let yy=yTemp(d.bt);
+      if(i===0)ctx.moveTo(xx,yy);
+      else ctx.lineTo(xx,yy);
     });
 
     ctx.stroke();
 
-    // BT points + labels
-    ctx.fillStyle = "#000";
-    ctx.font = "14px Arial";
+    ctx.fillStyle="#000";
+    ctx.font="14px Arial";
 
     btData.forEach(d=>{
-      let xx = x(d.t);
-      let yy = yTemp(d.bt);
+      let xx=x(d.t);
+      let yy=yTemp(d.bt);
 
       ctx.beginPath();
-      ctx.arc(xx, yy, 5, 0, Math.PI*2);
+      ctx.arc(xx,yy,5,0,Math.PI*2);
       ctx.fill();
 
-      ctx.fillText(Math.round(d.bt) + "C", xx+7, yy-10);
+      ctx.fillText(Math.round(d.bt)+"C",xx+7,yy-10);
     });
   }
 
-  // Power line, 0-100 mapped to graph height
-  let powerData = data.filter(d => !isNaN(d.power));
+  // Power step line: red, 50%
+  let powerData=data.filter(d=>!isNaN(d.power));
 
-  if(powerData.length > 0){
-    ctx.strokeStyle = "#444";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+  if(powerData.length>0){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="red";
+    ctx.lineWidth=3;
+    stepLine(powerData,"power",x,yPF);
+    ctx.restore();
 
-    powerData.forEach((d,i)=>{
-      let xx = x(d.t);
-      let yy = T + H - (d.power / 100) * H;
-
-      if(i === 0){
-        ctx.moveTo(xx, yy);
-      }else{
-        ctx.lineTo(xx, yy);
-      }
+    ctx.fillStyle="rgba(255,0,0,0.7)";
+    powerData.forEach(d=>{
+      ctx.fillText("P"+d.power,x(d.t)+4,yPF(d.power)+12);
     });
-
-    ctx.stroke();
   }
 
-  // Fan line, 0-100 mapped to graph height
-  let fanData = data.filter(d => !isNaN(d.fan));
+  // Fan step line: blue, 50%
+  let fanData=data.filter(d=>!isNaN(d.fan));
 
-  if(fanData.length > 0){
-    ctx.strokeStyle = "#999";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5,5]);
-    ctx.beginPath();
+  if(fanData.length>0){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="blue";
+    ctx.lineWidth=3;
+    stepLine(fanData,"fan",x,yPF);
+    ctx.restore();
 
-    fanData.forEach((d,i)=>{
-      let xx = x(d.t);
-      let yy = T + H - (d.fan / 100) * H;
-
-      if(i === 0){
-        ctx.moveTo(xx, yy);
-      }else{
-        ctx.lineTo(xx, yy);
-      }
+    ctx.fillStyle="rgba(0,0,255,0.7)";
+    fanData.forEach(d=>{
+      ctx.fillText("F"+d.fan,x(d.t)+4,yPF(d.fan)-10);
     });
-
-    ctx.stroke();
-    ctx.setLineDash([]);
   }
 
   // legend
-  ctx.fillStyle = "#000";
-  ctx.font = "14px Arial";
-  ctx.fillText("BT: black / Power: dark line / Fan: dashed gray", L+10, T+18);
+  ctx.fillStyle="#000";
+  ctx.font="14px Arial";
+  ctx.fillText("BT: black / Power: red step 50% / Fan: blue step 50%",L+10,T+18);
 }
 
 draw();
@@ -306,3 +279,5 @@ draw();
 
 </body>
 </html>
+
+</body>
