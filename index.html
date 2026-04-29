@@ -391,5 +391,4 @@ function deleteProfile(){let name=document.getElementById("profileList").value;i
 function refreshProfileList(){let p=getProfiles();let names=Object.keys(p).sort().reverse();document.getElementById("profileList").innerHTML=names.map(n=>'<option value="'+n+'">'+n+'</option>').join("")}
 function loadReference(){try{let r=JSON.parse(localStorage.getItem(REF_KEY)||"null");if(r&&r.p){reference=r.p;referenceName=r.name;document.getElementById("refStatus").innerText="Reference: "+referenceName}}catch(e){}}
 
-refreshProfileList();loadReference();draw();
-</script>
+refreshProfileList();loadReference();draw
