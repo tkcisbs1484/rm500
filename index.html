@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Complete v4</title>
+<title>RM500 Artisan Pro v5</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
 button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff}
 .event{background:#8a4b08}
+input,select{padding:8px;margin:4px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:460px;border:2px solid #000;background:#fff}
+canvas{width:100%;height:520px;border:2px solid #000;background:#fff}
 .metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
 </style>
 </head>
@@ -53,7 +54,7 @@ Profile <input id="profileName">
 <button onclick="saveProfile()">Save</button>
 <select id="profiles"></select>
 <button onclick="loadProfile()">Load</button>
-<button onclick="overlayProfile()">Overlay</button>
+<button onclick="compare()">Compare</button>
 <button onclick="exportCSV()">CSV</button>
 </div>
 
@@ -63,9 +64,10 @@ Profile <input id="profileName">
 
 <script>
 let running=false,startT=0,base=0;
-let rows=[],events={},overlay=null;
-const timeEl=document.getElementById("time");
+let rows=[],events={},compareData=[];
+
 const ctx=c.getContext("2d");
+const timeEl=document.getElementById("time");
 
 function now(){return running?base+Math.floor((Date.now()-startT)/1000):base}
 function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
@@ -96,27 +98,32 @@ function btRows(src=rows){return src.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t
 
 function interp(sec,src=rows){
 let b=btRows(src);
+if(b.length<2)return null;
 for(let i=1;i<b.length;i++){
 let p=b[i-1],c=b[i];
 if(p.t<=sec&&sec<=c.t){
 let r=(sec-p.t)/(c.t-p.t);
 return p.bt+(c.bt-p.bt)r;
 }}
-return b[b.length-1]?.bt||null;
+return b[b.length-1].bt;
 }
 
 function ror(src=rows){
 let out=[];
-for(let t=30;t<now();t+=5){
+for(let t=30;t<=840;t+=5){
 let a=interp(t,src),b=interp(t-30,src);
-if(a&&b)out.push({t,v:(a-b)/0.5});
-}
+if(a!=null&&b!=null){
+out.push({t,v:(a-b)/0.5});
+}}
 return smooth(out);
 }
 
 function smooth(r){
 return r.map((p,i)=>{
-let vals=r.slice(Math.max(0,i-2),i+3).map(v=>v.v);
+let vals=[];
+for(let j=i-2;j<=i+2;j++){
+if(r[j])vals.push(r[j].v);
+}
 return {t:p.t,v:vals.reduce((a,b)=>a+b)/vals.length};
 });
 }
@@ -131,35 +138,65 @@ dev.innerText=((d-f)/tot100).toFixed(0)+"%";
 }
 
 function drawLine(src,color){
+let b=btRows(src);
 ctx.beginPath();
-btRows(src).forEach((p,i)=>{
-let x=p.t,y=p.bt;
-if(i==0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+b.forEach((p,i)=>{
+let x=p.t1.4;
+let y=500-(p.bt2);
+if(i==0)ctx.moveTo(x,y);
+else ctx.lineTo(x,y);
 });
 ctx.strokeStyle=color;
 ctx.stroke();
+}
+
+function drawPowerFan(src,color){
+ctx.globalAlpha=0.5;
+
+let pw=src.filter(r=>!isNaN(r.pw));
+ctx.beginPath();
+pw.forEach((p,i)=>{
+let x=p.t1.4;
+let y=550-(p.pw2);
+if(i==0)ctx.moveTo(x,y);
+else ctx.lineTo(x,y);
+});
+ctx.strokeStyle="red";
+ctx.stroke();
+
+let fan=src.filter(r=>!isNaN(r.fan));
+ctx.beginPath();
+fan.forEach((p,i)=>{
+let x=p.t1.4;
+let y=550-(p.fan2);
+if(i==0)ctx.moveTo(x,y);
+else ctx.lineTo(x,y);
+});
+ctx.strokeStyle="blue";
+ctx.stroke();
+
+ctx.globalAlpha=1;
 }
 
 function draw(){
 phase();
 ctx.clearRect(0,0,c.width,c.height);
 
-ctx.save();
-ctx.scale(1, -1);
-ctx.translate(0, -c.height);
-
 drawLine(rows,"black");
-if(overlay)drawLine(overlay,"blue");
+drawPowerFan(rows);
+
+compareData.forEach(d=>drawLine(d,"blue"));
 
 let rr=ror(rows);
 ctx.beginPath();
 rr.forEach((p,i)=>{
-if(i==0)ctx.moveTo(p.t,p.v);else ctx.lineTo(p.t,p.v);
+let x=p.t1.4;
+let y=500-(p.v5);
+if(i==0)ctx.moveTo(x,y);
+else ctx.lineTo(x,y);
 });
 ctx.strokeStyle="orange";
 ctx.stroke();
-
-ctx.restore();
 }
 
 function saveProfile(){
@@ -169,15 +206,15 @@ loadList();
 }
 
 function loadProfile(){
-let name=profiles.value;
-let p=JSON.parse(localStorage.getItem(name));
-rows=p.rows;events=p.events;draw();
+let p=JSON.parse(localStorage.getItem(profiles.value));
+rows=p.rows;events=p.events;
+draw();
 }
 
-function overlayProfile(){
-let name=profiles.value;
-let p=JSON.parse(localStorage.getItem(name));
-overlay=p.rows;draw();
+function compare(){
+let p=JSON.parse(localStorage.getItem(profiles.value));
+compareData.push(p.rows);
+draw();
 }
 
 function loadList(){
@@ -188,16 +225,19 @@ profiles.innerHTML+=<option>${k}</option>;
 }
 
 function exportCSV(){
-let csv="time,BT\n";
-rows.forEach(r=>csv+=fmt(r.t)+","+r.bt+"\n");
+let csv="Time,BT,Power,Fan\n";
+rows.forEach(r=>{
+csv+=fmt(r.t)+","+r.bt+","+r.pw+","+r.fan+"\n";
+});
 let a=document.createElement("a");
 a.href=URL.createObjectURL(new Blob([csv]));
-a.download="roast.csv";
+a.download="artisan.csv";
 a.click();
 }
 
 loadList();
 draw();
 </script>
+
 </body>
 </html>
