@@ -3,255 +3,201 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan RoR v2</title>
+<title>RM500 Artisan Complete v4</title>
+
 <style>
-body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
+body{margin:0;background:#f5f5f5;font-family:Arial}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
-button{padding:10px 14px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff;font-size:15px}
-button.event{background:#8a4b08}
-input{padding:8px;margin:4px;width:90px;font-size:15px}
-#time{font-size:44px;text-align:center;font-weight:bold}
-canvas{width:100%;height:430px;background:white;border:2px solid #000;border-radius:10px}
+button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff}
+.event{background:#8a4b08}
+#time{font-size:42px;text-align:center}
+canvas{width:100%;height:460px;border:2px solid #000;background:#fff}
+.metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
 </style>
 </head>
+
 <body>
 
 <div class="card">
-  <div id="time">0:00</div>
-  <button onclick="startTimer()">Start</button>
-  <button onclick="stopTimer()">Stop</button>
-  <button onclick="resetTimer()">Reset</button>
-  <button onclick="shiftTime(-10)">-10s</button>
-  <button onclick="shiftTime(10)">+10s</button>
+<div id="time">0:00</div>
+<button onclick="start()">Start</button>
+<button onclick="stop()">Stop</button>
+<button onclick="resetTimer()">Reset</button>
+<button onclick="shift(-10)">-10s</button>
+<button onclick="shift(10)">+10s</button>
 </div>
 
 <div class="card">
-  BT <input id="btInput" type="number" step="1">
-  Power <input id="powerInput" type="number" step="5">
-  Fan <input id="fanInput" type="number" step="5">
-  <button onclick="savePoint()">Save</button>
+BT <input id="bt">
+Power <input id="pw">
+Fan <input id="fan">
+<button onclick="save()">Save</button>
 </div>
 
 <div class="card">
-  <button class="event" onclick="markEvent('Charge')">Charge</button>
-  <button class="event" onclick="markEvent('Bottom')">Bottom</button>
-  <button class="event" onclick="markEvent('GC')">GC</button>
-  <button class="event" onclick="markEvent('FC')">1st Crack</button>
-  <button class="event" onclick="markEvent('Drop')">Drop</button>
+<button class="event" onclick="mark('Charge')">Charge</button>
+<button class="event" onclick="mark('Bottom')">Bottom</button>
+<button class="event" onclick="mark('GC')">GC</button>
+<button class="event" onclick="mark('FC')">1C</button>
+<button class="event" onclick="mark('Drop')">Drop</button>
 </div>
 
 <div class="card">
-  <canvas id="graph" width="1100" height="520"></canvas>
+<span class="metric">Dry <b id="dry">-</b></span>
+<span class="metric">Maillard <b id="mai">-</b></span>
+<span class="metric">Dev <b id="dev">-</b></span>
+</div>
+
+<div class="card">
+Profile <input id="profileName">
+<button onclick="saveProfile()">Save</button>
+<select id="profiles"></select>
+<button onclick="loadProfile()">Load</button>
+<button onclick="overlayProfile()">Overlay</button>
+<button onclick="exportCSV()">CSV</button>
+</div>
+
+<div class="card">
+<canvas id="c" width="1200" height="560"></canvas>
 </div>
 
 <script>
-let running=false;
-let startMs=0;
-let baseSec=0;
-let data=[];
-let events={};
-
-const DELTA_SPAN=30;
-const SMOOTH_WINDOW=3;
-
+let running=false,startT=0,base=0;
+let rows=[],events={},overlay=null;
 const timeEl=document.getElementById("time");
-const canvas=document.getElementById("graph");
-const ctx=canvas.getContext("2d");
+const ctx=c.getContext("2d");
 
-function nowSec(){
-  return running ? baseSec + Math.floor((Date.now()-startMs)/1000) : baseSec;
+function now(){return running?base+Math.floor((Date.now()-startT)/1000):base}
+function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
+
+function start(){if(running)return;running=true;startT=Date.now();loop()}
+function stop(){base=now();running=false;draw()}
+function resetTimer(){base=0;running=false;draw()}
+function shift(d){base=Math.max(0,now()+d);if(running)startT=Date.now();draw()}
+
+function loop(){timeEl.innerText=fmt(now());draw();if(running)requestAnimationFrame(loop)}
+
+function save(){
+let t=now();
+rows.push({
+t,
+bt:parseFloat(bt.value),
+pw:parseFloat(pw.value),
+fan:parseFloat(fan.value),
+id:Date.now()
+});
+rows.sort((a,b)=>a.t-b.t);
+draw();
 }
 
-function fmt(sec){
-  sec=Math.max(0,Math.floor(sec));
-  let m=Math.floor(sec/60);
-  let s=sec%60;
-  return m+":"+String(s).padStart(2,"0");
+function mark(n){events[n]=now();draw()}
+
+function btRows(src=rows){return src.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t)}
+
+function interp(sec,src=rows){
+let b=btRows(src);
+for(let i=1;i<b.length;i++){
+let p=b[i-1],c=b[i];
+if(p.t<=sec&&sec<=c.t){
+let r=(sec-p.t)/(c.t-p.t);
+return p.bt+(c.bt-p.bt)r;
+}}
+return b[b.length-1]?.bt||null;
 }
 
-function startTimer(){
-  if(running)return;
-  running=true;
-  startMs=Date.now();
-  loop();
+function ror(src=rows){
+let out=[];
+for(let t=30;t<now();t+=5){
+let a=interp(t,src),b=interp(t-30,src);
+if(a&&b)out.push({t,v:(a-b)/0.5});
+}
+return smooth(out);
 }
 
-function stopTimer(){
-  baseSec=nowSec();
-  running=false;
-  timeEl.innerText=fmt(baseSec);
-  draw();
+function smooth(r){
+return r.map((p,i)=>{
+let vals=r.slice(Math.max(0,i-2),i+3).map(v=>v.v);
+return {t:p.t,v:vals.reduce((a,b)=>a+b)/vals.length};
+});
 }
 
-function resetTimer(){
-  baseSec=0;
-  running=false;
-  timeEl.innerText="0:00";
-  draw();
+function phase(){
+let s=events.Charge||0,g=events.GC,f=events.FC,d=events.Drop;
+if(!g||!f||!d)return;
+let tot=d-s;
+dry.innerText=((g-s)/tot100).toFixed(0)+"%";
+mai.innerText=((f-g)/tot100).toFixed(0)+"%";
+dev.innerText=((d-f)/tot100).toFixed(0)+"%";
 }
 
-function shiftTime(delta){
-  baseSec=Math.max(0,nowSec()+delta);
-  if(running)startMs=Date.now();
-  timeEl.innerText=fmt(baseSec);
-  draw();
-}
-
-function loop(){
-  timeEl.innerText=fmt(nowSec());
-  draw();
-  if(running)requestAnimationFrame(loop);
-}
-
-function savePoint(){
-  let t=nowSec();
-  let btVal=parseFloat(document.getElementById("btInput").value);
-  let powerVal=parseFloat(document.getElementById("powerInput").value);
-  let fanVal=parseFloat(document.getElementById("fanInput").value);
-
-  if(isNaN(btVal)&&isNaN(powerVal)&&isNaN(fanVal))return;
-
-  data.push({
-    t:t,
-    bt:btVal,
-    power:powerVal,
-    fan:fanVal
-  });
-
-  data.sort((a,b)=>a.t-b.t);
-  draw();
-}
-
-function markEvent(name){
-  events[name]=nowSec();
-  draw();
-}
-
-function btData(){
-  return data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
-}
-
-function getInterpolatedBT(sec){
-  let b=btData();
-  if(b.length===0)return null;
-  if(sec<b[0].t)return null;
-
-  if(sec>=b[b.length-1].t){
-    return b[b.length-1].bt;
-  }
-
-  for(let i=1;i<b.length;i++){
-    let prev=b[i-1];
-    let cur=b[i];
-
-    if(prev.t<=sec && sec<=cur.t){
-      let span=cur.t-prev.t;
-      if(span<=0)return cur.bt;
-      let ratio=(sec-prev.t)/span;
-      return prev.bt+(cur.bt-prev.bt)*ratio;
-    }
-  }
-
-  return null;
-}
-
-function calcArtisanRoR(){
-  let b=btData();
-  let out=[];
-  if(b.length<2)return out;
-
-  let start=Math.ceil((b[0].t+DELTA_SPAN)/5)*5;
-  let end=Math.floor(b[b.length-1].t/5)*5;
-
-  for(let sec=start;sec<=end;sec+=5){
-    let nowBT=getInterpolatedBT(sec);
-    let prevBT=getInterpolatedBT(sec-DELTA_SPAN);
-
-    if(nowBT===null||prevBT===null)continue;
-
-    let ror=(nowBT-prevBT)/(DELTA_SPAN/60);
-    out.push({t:sec,ror:ror});
-  }
-
-  return out;
+function drawLine(src,color){
+ctx.beginPath();
+btRows(src).forEach((p,i)=>{
+let x=p.t,y=p.bt;
+if(i==0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+});
+ctx.strokeStyle=color;
+ctx.stroke();
 }
 
 function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+phase();
+ctx.clearRect(0,0,c.width,c.height);
 
-  let L=70,R=60,T=25,B=55;
-  let W=canvas.width-L-R;
-  let H=canvas.height-T-B;
+ctx.save();
+ctx.scale(1, -1);
+ctx.translate(0, -c.height);
 
-  let maxTime=Math.max(14*60,nowSec(),...data.map(d=>d.t||0));
-  let maxTemp=230;
-  let maxRor=30;
+drawLine(rows,"black");
+if(overlay)drawLine(overlay,"blue");
 
-  let x=sec=>L+(sec/maxTime)*W;
-  let yTemp=temp=>T+H-(temp/maxTemp)*H;
-  let yRor=ror=>T+H-(Math.max(0,Math.min(maxRor,ror))/maxRor)*H;
+let rr=ror(rows);
+ctx.beginPath();
+rr.forEach((p,i)=>{
+if(i==0)ctx.moveTo(p.t,p.v);else ctx.lineTo(p.t,p.v);
+});
+ctx.strokeStyle="orange";
+ctx.stroke();
 
-  ctx.fillStyle="#fff";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  ctx.font="13px Arial";
-
-  for(let temp=0;temp<=230;temp+=10){
-    let y=yTemp(temp);
-    ctx.strokeStyle="#eee";
-    ctx.beginPath();
-    ctx.moveTo(L,y);
-    ctx.lineTo(L+W,y);
-    ctx.stroke();
-  }
-
-  for(let sec=0;sec<=maxTime;sec+=60){
-    let xx=x(sec);
-    ctx.strokeStyle="#ddd";
-    ctx.beginPath();
-    ctx.moveTo(xx,T);
-    ctx.lineTo(xx,T+H);
-    ctx.stroke();
-  }
-
-  let b=btData();
-
-  if(b.length){
-    ctx.strokeStyle="#000";
-    ctx.lineWidth=3;
-    ctx.beginPath();
-
-    b.forEach((d,i)=>{
-      let xx=x(d.t),yy=yTemp(d.bt);
-      if(i===0)ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    });
-
-    ctx.stroke();
-  }
-
-  let rr=calcArtisanRoR();
-
-  if(rr.length){
-    ctx.save();
-    ctx.globalAlpha=0.5;
-    ctx.strokeStyle="orange";
-    ctx.lineWidth=3;
-    ctx.beginPath();
-
-    rr.forEach((d,i)=>{
-      let xx=x(d.t),yy=yRor(d.ror);
-      if(i===0)ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    });
-
-    ctx.stroke();
-    ctx.restore();
-  }
+ctx.restore();
 }
 
+function saveProfile(){
+let name=profileName.value||Date.now();
+localStorage.setItem(name,JSON.stringify({rows,events}));
+loadList();
+}
+
+function loadProfile(){
+let name=profiles.value;
+let p=JSON.parse(localStorage.getItem(name));
+rows=p.rows;events=p.events;draw();
+}
+
+function overlayProfile(){
+let name=profiles.value;
+let p=JSON.parse(localStorage.getItem(name));
+overlay=p.rows;draw();
+}
+
+function loadList(){
+profiles.innerHTML="";
+Object.keys(localStorage).forEach(k=>{
+profiles.innerHTML+=<option>${k}</option>;
+});
+}
+
+function exportCSV(){
+let csv="time,BT\n";
+rows.forEach(r=>csv+=fmt(r.t)+","+r.bt+"\n");
+let a=document.createElement("a");
+a.href=URL.createObjectURL(new Blob([csv]));
+a.download="roast.csv";
+a.click();
+}
+
+loadList();
 draw();
 </script>
-
 </body>
 </html>
