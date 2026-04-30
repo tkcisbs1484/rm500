@@ -3,53 +3,83 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger v6 Safe</title>
-
+<title>RM500 Logger Base v5</title>
 <style>
-body{margin:0;background:#f5f5f5;font-family:Arial}
+body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
-button{padding:10px;margin:4px;border-radius:8px;border:0;background:#222;color:#fff}
-input{padding:8px;margin:4px;width:90px}
-#time{font-size:42px;text-align:center;font-weight:bold}
-canvas{width:100%;height:430px;border:2px solid #000;border-radius:10px;background:#fff}
+button{padding:10px 14px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff;font-size:15px}
+button.event{background:#8a4b08}
+input{padding:8px;margin:4px;width:90px;font-size:15px}
+#time{font-size:44px;text-align:center;font-weight:bold}
+canvas{width:100%;height:430px;background:white;border:2px solid #000;border-radius:10px;cursor:pointer}
 </style>
 </head>
-
 <body>
 
 <div class="card">
   <div id="time">0:00</div>
-  <button onclick="startTimer()">Start</button>
+  <button onclick="startTimer()">Timer Start</button>
   <button onclick="stopTimer()">Stop</button>
-  <button onclick="resetTimer()">Reset</button>
-  <button onclick="shift(-10)">-10s</button>
-  <button onclick="shift(10)">+10s</button>
+  <button onclick="clearTimer()">Clear Timer</button>
+  <button onclick="shiftTime(-10)">-10s</button>
+  <button onclick="shiftTime(10)">+10s</button>
 </div>
 
 <div class="card">
-  BT <input id="btInput" type="number">
-  Power <input id="powerInput" type="number">
-  Fan <input id="fanInput" type="number">
+  BT Temp <input id="bt" type="number" step="1">
+  Power <input id="power" type="number" step="5">
+  Fan <input id="fan" type="number" step="5">
   <button onclick="savePoint()">Save</button>
 </div>
 
 <div class="card">
-  <canvas id="c" width="1100" height="520"></canvas>
+  <button class="event" onclick="markEvent('Charge')">投入</button>
+  <button class="event" onclick="markEvent('Bottom')">ボトム</button>
+  <button class="event" onclick="markEvent('GC')">GC</button>
+  <button class="event" onclick="markEvent('FC')">1ハゼ</button>
+  <button class="event" onclick="markEvent('Drop')">排出</button>
+</div>
+
+<div class="card">
+  <canvas id="graph" width="1100" height="520"></canvas>
 </div>
 
 <script>
-let running=false,startMs=0,base=0,data=[];
+let running=false;
+let startMs=0;
+let baseSec=0;
+let data=[];
+let events={};
+let hitTargets=[];
+
 const timeEl=document.getElementById("time");
-const canvas=document.getElementById("c");
+const canvas=document.getElementById("graph");
 const ctx=canvas.getContext("2d");
 
-function now(){
-  return running ? base + Math.floor((Date.now()-startMs)/1000) : base;
+function nowSec(){
+  return running ? baseSec + Math.floor((Date.now()-startMs)/1000) : baseSec;
 }
 
-function fmt(s){
-  let m=Math.floor(s/60),sec=s%60;
-  return m+":"+("0"+sec).slice(-2);
+function fmt(sec){
+  sec=Math.max(0,Math.floor(sec));
+  let m=Math.floor(sec/60);
+  let s=sec%60;
+  return m+":"+String(s).padStart(2,"0");
+}
+
+function parseTime(v){
+  v=String(v).trim();
+  if(v.includes(":")){
+    let p=v.split(":");
+    if(p.length!==2)return null;
+    let m=parseInt(p[0],10);
+    let s=parseInt(p[1],10);
+    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
+    return m*60+s;
+  }
+  let n=parseFloat(v);
+  if(isNaN(n))return null;
+  return Math.max(0,Math.floor(n));
 }
 
 function startTimer(){
@@ -60,64 +90,102 @@ function startTimer(){
 }
 
 function stopTimer(){
-  base=now();
+  baseSec=nowSec();
   running=false;
+  timeEl.innerText=fmt(baseSec);
+  draw();
 }
 
-function resetTimer(){
-  base=0;
+function clearTimer(){
+  baseSec=0;
   running=false;
   timeEl.innerText="0:00";
   draw();
 }
 
-function shift(v){
-  base=Math.max(0,now()+v);
+function shiftTime(delta){
+  baseSec=Math.max(0,nowSec()+delta);
   if(running)startMs=Date.now();
+  timeEl.innerText=fmt(baseSec);
+  draw();
 }
 
 function loop(){
-  timeEl.innerText=fmt(now());
+  timeEl.innerText=fmt(nowSec());
   draw();
   if(running)requestAnimationFrame(loop);
 }
 
 function savePoint(){
-  let t=now();
-  let bt=parseFloat(btInput.value);
-  let power=parseFloat(powerInput.value);
-  let fan=parseFloat(fanInput.value);
+  let t=nowSec();
+  let bt=parseFloat(document.getElementById("bt").value);
+  let power=parseFloat(document.getElementById("power").value);
+  let fan=parseFloat(document.getElementById("fan").value);
 
   if(isNaN(bt)&&isNaN(power)&&isNaN(fan))return;
 
-  data.push({t,bt,power,fan});
+  data.push({
+    id:Date.now()+"_"+Math.random(),
+    t,bt,power,fan
+  });
+
   data.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
-/* ===== 実測BT取得 ===== */
-function getBTBefore(sec){
-  let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
-  let found=null;
+function markEvent(name){
+  events[name]=nowSec();
+  draw();
+}
+
+function btData(){
+  return data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
+}
+
+function getBTAt(sec){
+  let b=btData();
+  if(!b.length)return null;
+
+  if(sec<b[0].t)return null;
+
   for(let i=0;i<b.length;i++){
-    if(b[i].t<=sec)found=b[i];
+    if(b[i].t===sec)return b[i].bt;
   }
-  return found ? found.bt : null;
+
+  for(let i=1;i<b.length;i++){
+    let a=b[i-1];
+    let c=b[i];
+
+    if(a.t<=sec && sec<=c.t){
+      let ratio=(sec-a.t)/(c.t-a.t);
+      return a.bt + (c.bt-a.bt)*ratio;
+    }
+  }
+
+  return b[b.length-1].bt;
 }
 
-/* ===== RoR（実測） ===== */
-function calcROR(){
+/*
+RoR calculation:
+RoR at 8:00 = BT at 8:00 - BT at 7:00.
+This prevents RoR from jumping with FC/event temperature.
+*/
+function rorData(){
   let out=[];
-  let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
+  let b=btData();
+  if(b.length<2)return out;
 
-  for(let i=0;i<b.length;i++){
-    let nowT=b[i].t;
-    let nowBT=b[i].bt;
-    let prevBT=getBTBefore(nowT-60);
+  let start=Math.max(60,Math.ceil(b[0].t/30)*30);
+  let end=Math.min(14*60,Math.floor(b[b.length-1].t/30)*30);
 
-    if(prevBT===null)continue;
+  for(let sec=start;sec<=end;sec+=30){
+    let nowBT=getBTAt(sec);
+    let prevBT=getBTAt(sec-60);
+
+    if(nowBT===null||prevBT===null)continue;
 
     out.push({
-      t:nowT,
+      t:sec,
       ror:nowBT-prevBT
     });
   }
@@ -125,20 +193,65 @@ function calcROR(){
   return out;
 }
 
-function draw(){
+function smoothRor(){
+  let r=rorData();
+  let out=[];
 
-  /* 🔥 安全な描画サイズ取得 */
-  let L=70,T=20,R=60,B=55;
+  for(let i=0;i<r.length;i++){
+    let vals=[];
+    for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++){
+      vals.push(r[j].ror);
+    }
+
+    out.push({
+      t:r[i].t,
+      ror:vals.reduce((a,b)=>a+b,0)/vals.length
+    });
+  }
+
+  return out;
+}
+
+function stepLine(points,valueKey,x,y){
+  if(points.length===0)return;
+
+  ctx.beginPath();
+  let prev=points[0];
+  ctx.moveTo(x(prev.t),y(prev[valueKey]));
+
+  for(let i=1;i<points.length;i++){
+    let cur=points[i];
+    ctx.lineTo(x(cur.t),y(prev[valueKey]));
+    ctx.lineTo(x(cur.t),y(cur[valueKey]));
+    prev=cur;
+  }
+
+  ctx.stroke();
+}
+
+function draw(){
+  hitTargets=[];
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  let L=70;
+  let R=60;
+  let T=25;
+  let B=55;
+
   let W=canvas.width-L-R;
   let H=canvas.height-T-B;
 
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
   let maxTime=14*60;
+  let maxTemp=230;
+  let maxRor=30;
 
-  let x=t=>L+(t/maxTime)*W;
-  let yBT=v=>T+H-(v/230)*H;
-  let yROR=v=>T+H-(Math.max(0,Math.min(30,v))/30)*H;
+  let x=sec=>L+(sec/maxTime)*W;
+  let yTemp=temp=>T+H-(temp/maxTemp)*H;
+  let yRor=ror=>T+H-(Math.max(0,Math.min(maxRor,ror))/maxRor)*H;
+
+  let pfTop=T+H*(2/3);
+  let pfH=H/3;
+  let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
 
   ctx.fillStyle="#fff";
   ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -146,53 +259,94 @@ function draw(){
   ctx.font="13px Arial";
   ctx.textBaseline="middle";
 
-  /* 温度グリッド */
-  for(let temp=0;temp<=230;temp+=10){
-    let y=yBT(temp);
-    ctx.strokeStyle="#eee";
+  for(let temp=0;temp<=230;temp+=5){
+    let yy=yTemp(temp);
+    ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
+    ctx.lineWidth=1;
     ctx.beginPath();
-    ctx.moveTo(L,y);
-    ctx.lineTo(L+W,y);
+    ctx.moveTo(L,yy);
+    ctx.lineTo(L+W,yy);
     ctx.stroke();
 
-    ctx.fillStyle="#000";
-    ctx.fillText(temp+"C",10,y);
+    if(temp%10===0){
+      ctx.fillStyle="#000";
+      ctx.fillText(temp+"C",10,yy);
+    }
   }
 
-  /* 時間グリッド */
-  for(let s=0;s<=maxTime;s+=30){
-    let xx=x(s);
-    ctx.strokeStyle=s%60===0 ? "#ddd" : "#f0f0f0";
+  for(let sec=0;sec<=maxTime;sec+=30){
+    let xx=x(sec);
+    ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f0f0f0";
     ctx.beginPath();
     ctx.moveTo(xx,T);
     ctx.lineTo(xx,T+H);
     ctx.stroke();
 
-    if(s%60===0){
+    if(sec%60===0){
       ctx.fillStyle="#000";
-      ctx.fillText((s/60)+"m",xx-10,T+H+25);
+      ctx.fillText((sec/60)+"m",xx-10,T+H+25);
     }
   }
 
-  /* 軸 */
+  ctx.strokeStyle="rgba(0,0,0,0.3)";
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.moveTo(L,pfTop);
+  ctx.lineTo(L+W,pfTop);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle="#666";
+  ctx.fillText("Power/Fan zone",L+8,pfTop+14);
+
   ctx.strokeStyle="#000";
   ctx.lineWidth=2;
   ctx.beginPath();
   ctx.moveTo(L,T);
   ctx.lineTo(L,T+H);
   ctx.lineTo(L+W,T+H);
+  ctx.lineTo(L+W,T);
   ctx.stroke();
 
-  /* BT */
-  let b=data.filter(d=>!isNaN(d.bt));
+  ctx.fillStyle="#666";
+  ctx.font="12px Arial";
+  for(let r=0;r<=30;r+=5){
+    let yy=yRor(r);
+    ctx.fillText(r,L+W+14,yy);
+  }
+  ctx.fillText("RoR",L+W+14,T+14);
 
-  if(b.length){
+  Object.keys(events).forEach(name=>{
+    let t=events[name];
+    if(t<0||t>maxTime)return;
+
+    let xx=x(t);
+    ctx.strokeStyle="#b36b00";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(xx,T);
+    ctx.lineTo(xx,T+H);
+    ctx.stroke();
+
+    ctx.fillStyle="#b36b00";
+    ctx.save();
+    ctx.translate(xx+6,T+25);
+    ctx.rotate(Math.PI/2);
+    ctx.fillText(name+" "+fmt(t),0,0);
+    ctx.restore();
+  });
+
+  let b=btData();
+
+  if(b.length>0){
     ctx.strokeStyle="#000";
     ctx.lineWidth=3;
     ctx.beginPath();
 
     b.forEach((d,i)=>{
-      let xx=x(d.t),yy=yBT(d.bt);
+      let xx=x(d.t);
+      let yy=yTemp(d.bt);
+
       if(i===0)ctx.moveTo(xx,yy);
       else ctx.lineTo(xx,yy);
     });
@@ -200,19 +354,33 @@ function draw(){
     ctx.stroke();
 
     ctx.fillStyle="#000";
+    ctx.font="14px Arial";
+
     b.forEach(d=>{
-      let xx=x(d.t),yy=yBT(d.bt);
+      let xx=x(d.t);
+      let yy=yTemp(d.bt);
+
       ctx.beginPath();
       ctx.arc(xx,yy,5,0,Math.PI*2);
       ctx.fill();
-      ctx.fillText(Math.round(d.bt)+"C",xx+7,yy-10);
+
+      let label=Math.round(d.bt)+"C";
+      ctx.fillText(label,xx+7,yy-10);
+
+      hitTargets.push({
+        row:d,
+        x:xx,
+        y:yy,
+        labelX:xx+7,
+        labelY:yy-10,
+        radius:28
+      });
     });
   }
 
-  /* RoR */
-  let rr=calcROR();
+  let rr=smoothRor();
 
-  if(rr.length){
+  if(rr.length>0){
     ctx.save();
     ctx.globalAlpha=0.5;
     ctx.strokeStyle="orange";
@@ -220,7 +388,9 @@ function draw(){
     ctx.beginPath();
 
     rr.forEach((d,i)=>{
-      let xx=x(d.t),yy=yROR(d.ror);
+      let xx=x(d.t);
+      let yy=yRor(d.ror);
+
       if(i===0)ctx.moveTo(xx,yy);
       else ctx.lineTo(xx,yy);
     });
@@ -229,9 +399,80 @@ function draw(){
     ctx.restore();
   }
 
+  let powerData=data.filter(d=>!isNaN(d.power)).sort((a,b)=>a.t-b.t);
+
+  if(powerData.length>0){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="red";
+    ctx.lineWidth=3;
+    stepLine(powerData,"power",x,yPF);
+    ctx.restore();
+
+    ctx.fillStyle="rgba(255,0,0,0.75)";
+    powerData.forEach(d=>{
+      ctx.fillText("P"+d.power,x(d.t)+4,yPF(d.power)+12);
+    });
+  }
+
+  let fanData=data.filter(d=>!isNaN(d.fan)).sort((a,b)=>a.t-b.t);
+
+  if(fanData.length>0){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="blue";
+    ctx.lineWidth=3;
+    stepLine(fanData,"fan",x,yPF);
+    ctx.restore();
+
+    ctx.fillStyle="rgba(0,0,255,0.75)";
+    fanData.forEach(d=>{
+      ctx.fillText("F"+d.fan,x(d.t)+4,yPF(d.fan)-10);
+    });
+  }
+
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("BT: black / RoR: actual (no interpolation)",L+10,T+18);
+  ctx.fillText("BT: black / RoR: orange = BT now - BT 60s ago / Power: red / Fan: blue",L+10,T+18);
+}
+
+canvas.addEventListener("click",function(e){
+  let rect=canvas.getBoundingClientRect();
+  let sx=canvas.width/rect.width;
+  let sy=canvas.height/rect.height;
+  let mx=(e.clientX-rect.left)*sx;
+  let my=(e.clientY-rect.top)*sy;
+
+  let candidates=hitTargets.map(h=>{
+    let d1=Math.hypot(mx-h.x,my-h.y);
+    let d2=Math.hypot(mx-h.labelX,my-h.labelY);
+    return {h,d:Math.min(d1,d2)};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(!candidates.length)return;
+
+  candidates.sort((a,b)=>a.d-b.d);
+  editPoint(candidates[0].h.row);
+});
+
+function editPoint(row){
+  let newTime=prompt("Time mm:ss",fmt(row.t));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  let newBT=prompt("BT temperature",row.bt);
+  if(newBT===null)return;
+
+  row.t=parsed;
+  row.bt=parseFloat(newBT);
+
+  data.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
 draw();
