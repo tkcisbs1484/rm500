@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger Base v4</title>
+<title>RM500 Logger Base v5</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -11,7 +11,7 @@ button{padding:10px 14px;margin:4px;border:0;border-radius:8px;background:#222;c
 button.event{background:#8a4b08}
 input{padding:8px;margin:4px;width:90px;font-size:15px}
 #time{font-size:44px;text-align:center;font-weight:bold}
-canvas{width:100%;height:430px;background:white;border:2px solid #000;border-radius:10px}
+canvas{width:100%;height:430px;background:white;border:2px solid #000;border-radius:10px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -50,6 +50,7 @@ let startMs=0;
 let baseSec=0;
 let data=[];
 let events={};
+let hitTargets=[];
 
 const timeEl=document.getElementById("time");
 const canvas=document.getElementById("graph");
@@ -64,6 +65,21 @@ function fmt(sec){
   let m=Math.floor(sec/60);
   let s=sec%60;
   return m+":"+String(s).padStart(2,"0");
+}
+
+function parseTime(v){
+  v=String(v).trim();
+  if(v.includes(":")){
+    let p=v.split(":");
+    if(p.length!==2)return null;
+    let m=parseInt(p[0],10);
+    let s=parseInt(p[1],10);
+    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
+    return m*60+s;
+  }
+  let n=parseFloat(v);
+  if(isNaN(n))return null;
+  return Math.max(0,Math.floor(n));
 }
 
 function startTimer(){
@@ -108,9 +124,12 @@ function savePoint(){
 
   if(isNaN(bt)&&isNaN(power)&&isNaN(fan))return;
 
-  data.push({t,bt,power,fan});
-  data.sort((a,b)=>a.t-b.t);
+  data.push({
+    id:Date.now()+"_"+Math.random(),
+    t,bt,power,fan
+  });
 
+  data.sort((a,b)=>a.t-b.t);
   draw();
 }
 
@@ -123,20 +142,51 @@ function btData(){
   return data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
 }
 
-function rorData(){
+function getBTAt(sec){
   let b=btData();
-  let out=[];
+  if(!b.length)return null;
+
+  if(sec<b[0].t)return null;
+
+  for(let i=0;i<b.length;i++){
+    if(b[i].t===sec)return b[i].bt;
+  }
 
   for(let i=1;i<b.length;i++){
-    let dtSec=b[i].t-b[i-1].t;
-    if(dtSec<=0)continue;
+    let a=b[i-1];
+    let c=b[i];
 
-    let tempDiff=b[i].bt-b[i-1].bt;
-    let ror=tempDiff/(dtSec/60);
+    if(a.t<=sec && sec<=c.t){
+      let ratio=(sec-a.t)/(c.t-a.t);
+      return a.bt + (c.bt-a.bt)*ratio;
+    }
+  }
+
+  return b[b.length-1].bt;
+}
+
+/*
+RoR calculation:
+RoR at 8:00 = BT at 8:00 - BT at 7:00.
+This prevents RoR from jumping with FC/event temperature.
+*/
+function rorData(){
+  let out=[];
+  let b=btData();
+  if(b.length<2)return out;
+
+  let start=Math.max(60,Math.ceil(b[0].t/30)*30);
+  let end=Math.min(14*60,Math.floor(b[b.length-1].t/30)*30);
+
+  for(let sec=start;sec<=end;sec+=30){
+    let nowBT=getBTAt(sec);
+    let prevBT=getBTAt(sec-60);
+
+    if(nowBT===null||prevBT===null)continue;
 
     out.push({
-      t:b[i].t,
-      ror:ror
+      t:sec,
+      ror:nowBT-prevBT
     });
   }
 
@@ -149,7 +199,6 @@ function smoothRor(){
 
   for(let i=0;i<r.length;i++){
     let vals=[];
-
     for(let j=Math.max(0,i-1);j<=Math.min(r.length-1,i+1);j++){
       vals.push(r[j].ror);
     }
@@ -167,7 +216,6 @@ function stepLine(points,valueKey,x,y){
   if(points.length===0)return;
 
   ctx.beginPath();
-
   let prev=points[0];
   ctx.moveTo(x(prev.t),y(prev[valueKey]));
 
@@ -182,6 +230,7 @@ function stepLine(points,valueKey,x,y){
 }
 
 function draw(){
+  hitTargets=[];
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   let L=70;
@@ -210,10 +259,8 @@ function draw(){
   ctx.font="13px Arial";
   ctx.textBaseline="middle";
 
-  // temp grid
   for(let temp=0;temp<=230;temp+=5){
     let yy=yTemp(temp);
-
     ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
     ctx.lineWidth=1;
     ctx.beginPath();
@@ -227,10 +274,8 @@ function draw(){
     }
   }
 
-  // time grid 30 sec
   for(let sec=0;sec<=maxTime;sec+=30){
     let xx=x(sec);
-
     ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f0f0f0";
     ctx.beginPath();
     ctx.moveTo(xx,T);
@@ -243,7 +288,6 @@ function draw(){
     }
   }
 
-  // Power/Fan zone lower 1/3
   ctx.strokeStyle="rgba(0,0,0,0.3)";
   ctx.setLineDash([4,4]);
   ctx.beginPath();
@@ -255,7 +299,6 @@ function draw(){
   ctx.fillStyle="#666";
   ctx.fillText("Power/Fan zone",L+8,pfTop+14);
 
-  // axis
   ctx.strokeStyle="#000";
   ctx.lineWidth=2;
   ctx.beginPath();
@@ -265,7 +308,6 @@ function draw(){
   ctx.lineTo(L+W,T);
   ctx.stroke();
 
-  // ROR scale
   ctx.fillStyle="#666";
   ctx.font="12px Arial";
   for(let r=0;r<=30;r+=5){
@@ -274,13 +316,11 @@ function draw(){
   }
   ctx.fillText("RoR",L+W+14,T+14);
 
-  // events
   Object.keys(events).forEach(name=>{
     let t=events[name];
     if(t<0||t>maxTime)return;
 
     let xx=x(t);
-
     ctx.strokeStyle="#b36b00";
     ctx.lineWidth=2;
     ctx.beginPath();
@@ -296,7 +336,6 @@ function draw(){
     ctx.restore();
   });
 
-  // BT
   let b=btData();
 
   if(b.length>0){
@@ -325,11 +364,20 @@ function draw(){
       ctx.arc(xx,yy,5,0,Math.PI*2);
       ctx.fill();
 
-      ctx.fillText(Math.round(d.bt)+"C",xx+7,yy-10);
+      let label=Math.round(d.bt)+"C";
+      ctx.fillText(label,xx+7,yy-10);
+
+      hitTargets.push({
+        row:d,
+        x:xx,
+        y:yy,
+        labelX:xx+7,
+        labelY:yy-10,
+        radius:28
+      });
     });
   }
 
-  // ROR
   let rr=smoothRor();
 
   if(rr.length>0){
@@ -351,7 +399,6 @@ function draw(){
     ctx.restore();
   }
 
-  // Power
   let powerData=data.filter(d=>!isNaN(d.power)).sort((a,b)=>a.t-b.t);
 
   if(powerData.length>0){
@@ -368,7 +415,6 @@ function draw(){
     });
   }
 
-  // Fan
   let fanData=data.filter(d=>!isNaN(d.fan)).sort((a,b)=>a.t-b.t);
 
   if(fanData.length>0){
@@ -387,7 +433,46 @@ function draw(){
 
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("BT: black / RoR: orange / Power: red step / Fan: blue step",L+10,T+18);
+  ctx.fillText("BT: black / RoR: orange = BT now - BT 60s ago / Power: red / Fan: blue",L+10,T+18);
+}
+
+canvas.addEventListener("click",function(e){
+  let rect=canvas.getBoundingClientRect();
+  let sx=canvas.width/rect.width;
+  let sy=canvas.height/rect.height;
+  let mx=(e.clientX-rect.left)*sx;
+  let my=(e.clientY-rect.top)*sy;
+
+  let candidates=hitTargets.map(h=>{
+    let d1=Math.hypot(mx-h.x,my-h.y);
+    let d2=Math.hypot(mx-h.labelX,my-h.labelY);
+    return {h,d:Math.min(d1,d2)};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(!candidates.length)return;
+
+  candidates.sort((a,b)=>a.d-b.d);
+  editPoint(candidates[0].h.row);
+});
+
+function editPoint(row){
+  let newTime=prompt("Time mm:ss",fmt(row.t));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  let newBT=prompt("BT temperature",row.bt);
+  if(newBT===null)return;
+
+  row.t=parsed;
+  row.bt=parseFloat(newBT);
+
+  data.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
 draw();
