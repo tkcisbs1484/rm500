@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger Base v7</title>
+<title>RM500 Logger v6 Safe</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
@@ -17,7 +17,6 @@ canvas{width:100%;height:430px;border:2px solid #000;border-radius:10px;backgrou
 
 <body>
 
-<!-- 🔥 タイマー -->
 <div class="card">
   <div id="time">0:00</div>
   <button onclick="startTimer()">Start</button>
@@ -27,15 +26,13 @@ canvas{width:100%;height:430px;border:2px solid #000;border-radius:10px;backgrou
   <button onclick="shift(10)">+10s</button>
 </div>
 
-<!-- 🔥 入力フォーム（ここだけ表示される） -->
 <div class="card">
-  BT <input id="bt" type="number">
-  Power <input id="power" type="number">
-  Fan <input id="fan" type="number">
-  <button onclick="save()">Save</button>
+  BT <input id="btInput" type="number">
+  Power <input id="powerInput" type="number">
+  Fan <input id="fanInput" type="number">
+  <button onclick="savePoint()">Save</button>
 </div>
 
-<!-- 🔥 グラフ -->
 <div class="card">
   <canvas id="c" width="1100" height="520"></canvas>
 </div>
@@ -43,7 +40,8 @@ canvas{width:100%;height:430px;border:2px solid #000;border-radius:10px;backgrou
 <script>
 let running=false,startMs=0,base=0,data=[];
 const timeEl=document.getElementById("time");
-const ctx=document.getElementById("c").getContext("2d");
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
 
 function now(){
   return running ? base + Math.floor((Date.now()-startMs)/1000) : base;
@@ -84,11 +82,11 @@ function loop(){
   if(running)requestAnimationFrame(loop);
 }
 
-function save(){
+function savePoint(){
   let t=now();
-  let bt=parseFloat(document.getElementById("bt").value);
-  let power=parseFloat(document.getElementById("power").value);
-  let fan=parseFloat(document.getElementById("fan").value);
+  let bt=parseFloat(btInput.value);
+  let power=parseFloat(powerInput.value);
+  let fan=parseFloat(fanInput.value);
 
   if(isNaN(bt)&&isNaN(power)&&isNaN(fan))return;
 
@@ -96,19 +94,17 @@ function save(){
   data.sort((a,b)=>a.t-b.t);
 }
 
-/* 🔥 実測のみ */
+/* ===== 実測BT取得 ===== */
 function getBTBefore(sec){
   let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
   let found=null;
-
   for(let i=0;i<b.length;i++){
-    if(b[i].t<=sec){
-      found=b[i];
-    }
+    if(b[i].t<=sec)found=b[i];
   }
   return found ? found.bt : null;
 }
 
+/* ===== RoR（実測） ===== */
 function calcROR(){
   let out=[];
   let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
@@ -130,9 +126,14 @@ function calcROR(){
 }
 
 function draw(){
-  ctx.clearRect(0,0,1100,520);
 
-  let L=70,T=20,W=950,H=420;
+  /* 🔥 安全な描画サイズ取得 */
+  let L=70,T=20,R=60,B=55;
+  let W=canvas.width-L-R;
+  let H=canvas.height-T-B;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
   let maxTime=14*60;
 
   let x=t=>L+(t/maxTime)*W;
@@ -140,9 +141,12 @@ function draw(){
   let yROR=v=>T+H-(Math.max(0,Math.min(30,v))/30)*H;
 
   ctx.fillStyle="#fff";
-  ctx.fillRect(0,0,1100,520);
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  /* grid */
+  ctx.font="13px Arial";
+  ctx.textBaseline="middle";
+
+  /* 温度グリッド */
   for(let temp=0;temp<=230;temp+=10){
     let y=yBT(temp);
     ctx.strokeStyle="#eee";
@@ -150,16 +154,34 @@ function draw(){
     ctx.moveTo(L,y);
     ctx.lineTo(L+W,y);
     ctx.stroke();
+
+    ctx.fillStyle="#000";
+    ctx.fillText(temp+"C",10,y);
   }
 
-  for(let s=0;s<=maxTime;s+=60){
+  /* 時間グリッド */
+  for(let s=0;s<=maxTime;s+=30){
     let xx=x(s);
-    ctx.strokeStyle="#ddd";
+    ctx.strokeStyle=s%60===0 ? "#ddd" : "#f0f0f0";
     ctx.beginPath();
     ctx.moveTo(xx,T);
     ctx.lineTo(xx,T+H);
     ctx.stroke();
+
+    if(s%60===0){
+      ctx.fillStyle="#000";
+      ctx.fillText((s/60)+"m",xx-10,T+H+25);
+    }
   }
+
+  /* 軸 */
+  ctx.strokeStyle="#000";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(L,T);
+  ctx.lineTo(L,T+H);
+  ctx.lineTo(L+W,T+H);
+  ctx.stroke();
 
   /* BT */
   let b=data.filter(d=>!isNaN(d.bt));
@@ -176,9 +198,18 @@ function draw(){
     });
 
     ctx.stroke();
+
+    ctx.fillStyle="#000";
+    b.forEach(d=>{
+      let xx=x(d.t),yy=yBT(d.bt);
+      ctx.beginPath();
+      ctx.arc(xx,yy,5,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillText(Math.round(d.bt)+"C",xx+7,yy-10);
+    });
   }
 
-  /* 🔥 RoR */
+  /* RoR */
   let rr=calcROR();
 
   if(rr.length){
@@ -197,6 +228,10 @@ function draw(){
     ctx.stroke();
     ctx.restore();
   }
+
+  ctx.fillStyle="#000";
+  ctx.font="14px Arial";
+  ctx.fillText("BT: black / RoR: actual (no interpolation)",L+10,T+18);
 }
 
 draw();
