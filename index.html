@@ -3,50 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Logger Base v7</title>
+<title>RM500 Logger Base v6</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
 button{padding:10px;margin:4px;border-radius:8px;border:0;background:#222;color:#fff}
 input{padding:8px;margin:4px;width:90px}
-#time{font-size:42px;text-align:center;font-weight:bold}
+#time{font-size:42px;text-align:center}
 canvas{width:100%;height:430px;border:2px solid #000;border-radius:10px;background:#fff}
 </style>
 </head>
 
 <body>
 
-<!-- 🔥 タイマー -->
 <div class="card">
-  <div id="time">0:00</div>
-  <button onclick="startTimer()">Start</button>
-  <button onclick="stopTimer()">Stop</button>
-  <button onclick="resetTimer()">Reset</button>
-  <button onclick="shift(-10)">-10s</button>
-  <button onclick="shift(10)">+10s</button>
+<div id="time">0:00</div>
+<button onclick="startTimer()">Start</button>
+<button onclick="stopTimer()">Stop</button>
+<button onclick="clearTimer()">Reset</button>
+<button onclick="shift(-10)">-10s</button>
+<button onclick="shift(10)">+10s</button>
 </div>
 
-<!-- 🔥 入力フォーム（ここだけ表示される） -->
 <div class="card">
-  BT <input id="bt" type="number">
-  Power <input id="power" type="number">
-  Fan <input id="fan" type="number">
-  <button onclick="save()">Save</button>
+BT <input id="bt">
+Power <input id="power">
+Fan <input id="fan">
+<button onclick="save()">Save</button>
 </div>
 
-<!-- 🔥 グラフ -->
-<div class="card">
-  <canvas id="c" width="1100" height="520"></canvas>
-</div>
+<canvas id="c" width="1100" height="520"></canvas>
 
 <script>
-let running=false,startMs=0,base=0,data=[];
-const timeEl=document.getElementById("time");
-const ctx=document.getElementById("c").getContext("2d");
+let running=false,start=0,base=0,data=[];
+const ctx=c.getContext("2d");
 
 function now(){
-  return running ? base + Math.floor((Date.now()-startMs)/1000) : base;
+  return running ? base + Math.floor((Date.now()-start)/1000) : base;
 }
 
 function fmt(s){
@@ -57,38 +51,39 @@ function fmt(s){
 function startTimer(){
   if(running)return;
   running=true;
-  startMs=Date.now();
+  start=Date.now();
   loop();
 }
 
 function stopTimer(){
   base=now();
   running=false;
+  time.innerText=fmt(base);
 }
 
-function resetTimer(){
+function clearTimer(){
   base=0;
   running=false;
-  timeEl.innerText="0:00";
+  time.innerText="0:00";
   draw();
 }
 
 function shift(v){
   base=Math.max(0,now()+v);
-  if(running)startMs=Date.now();
+  if(running)start=Date.now();
 }
 
 function loop(){
-  timeEl.innerText=fmt(now());
+  time.innerText=fmt(now());
   draw();
   if(running)requestAnimationFrame(loop);
 }
 
 function save(){
   let t=now();
-  let bt=parseFloat(document.getElementById("bt").value);
-  let power=parseFloat(document.getElementById("power").value);
-  let fan=parseFloat(document.getElementById("fan").value);
+  let bt=parseFloat(btInput.value);
+  let power=parseFloat(powerInput.value);
+  let fan=parseFloat(fanInput.value);
 
   if(isNaN(bt)&&isNaN(power)&&isNaN(fan))return;
 
@@ -96,7 +91,9 @@ function save(){
   data.sort((a,b)=>a.t-b.t);
 }
 
-/* 🔥 実測のみ */
+/* =====================
+   🔥 補間なしBT取得
+===================== */
 function getBTBefore(sec){
   let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
   let found=null;
@@ -109,6 +106,9 @@ function getBTBefore(sec){
   return found ? found.bt : null;
 }
 
+/* =====================
+   🔥 RoR（実測のみ）
+===================== */
 function calcROR(){
   let out=[];
   let b=data.filter(d=>!isNaN(d.bt)).sort((a,b)=>a.t-b.t);
@@ -116,13 +116,16 @@ function calcROR(){
   for(let i=0;i<b.length;i++){
     let nowT=b[i].t;
     let nowBT=b[i].bt;
+
     let prevBT=getBTBefore(nowT-60);
 
     if(prevBT===null)continue;
 
+    let ror=nowBT-prevBT;
+
     out.push({
       t:nowT,
-      ror:nowBT-prevBT
+      ror:ror
     });
   }
 
@@ -130,21 +133,17 @@ function calcROR(){
 }
 
 function draw(){
-  ctx.clearRect(0,0,1100,520);
+  ctx.clearRect(0,0,c.width,c.height);
 
   let L=70,T=20,W=950,H=420;
-  let maxTime=14*60;
 
-  let x=t=>L+(t/maxTime)*W;
+  let x=t=>L+(t/(14*60))*W;
   let yBT=v=>T+H-(v/230)*H;
-  let yROR=v=>T+H-(Math.max(0,Math.min(30,v))/30)*H;
-
-  ctx.fillStyle="#fff";
-  ctx.fillRect(0,0,1100,520);
+  let yROR=v=>T+H-(v/30)*H;
 
   /* grid */
-  for(let temp=0;temp<=230;temp+=10){
-    let y=yBT(temp);
+  for(let i=0;i<=230;i+=10){
+    let y=yBT(i);
     ctx.strokeStyle="#eee";
     ctx.beginPath();
     ctx.moveTo(L,y);
@@ -152,7 +151,7 @@ function draw(){
     ctx.stroke();
   }
 
-  for(let s=0;s<=maxTime;s+=60){
+  for(let s=0;s<=14*60;s+=60){
     let xx=x(s);
     ctx.strokeStyle="#ddd";
     ctx.beginPath();
@@ -171,14 +170,14 @@ function draw(){
 
     b.forEach((d,i)=>{
       let xx=x(d.t),yy=yBT(d.bt);
-      if(i===0)ctx.moveTo(xx,yy);
+      if(i==0)ctx.moveTo(xx,yy);
       else ctx.lineTo(xx,yy);
     });
 
     ctx.stroke();
   }
 
-  /* 🔥 RoR */
+  /* 🔥 ROR（修正版） */
   let rr=calcROR();
 
   if(rr.length){
@@ -190,7 +189,7 @@ function draw(){
 
     rr.forEach((d,i)=>{
       let xx=x(d.t),yy=yROR(d.ror);
-      if(i===0)ctx.moveTo(xx,yy);
+      if(i==0)ctx.moveTo(xx,yy);
       else ctx.lineTo(xx,yy);
     });
 
