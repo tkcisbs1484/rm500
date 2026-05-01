@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v6 Strong RoR</title>
+<title>RM500 Artisan Pro v7 RoR End Fix</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -186,27 +186,32 @@ function interp(sec,src=rows){
   return null;
 }
 
-/* 強めRoR安定化 */
 function ror(src=rows){
   let out=[];
   let prevV=null;
+  let b=btRows(src);
 
-  for(let t=30;t<=14*60;t+=5){
+  if(b.length<2)return out;
+
+  let lastT=b[b.length-1].t;
+  let endT=Math.min(14*60,lastT-5);
+
+  for(let t=30;t<=endT;t+=5){
     let a=interp(t,src);
-    let b=interp(t-30,src);
+    let bPrev=interp(t-30,src);
 
-    if(a!=null&&b!=null){
-      let v=(a-b)/0.5;
+    if(a!=null&&bPrev!=null){
+      let v=(a-bPrev)/0.5;
 
       if(v<0)v=0;
-      if(v>14)v=14;
+      if(v>35)v=35;
 
-      if(prevV!==null && v>prevV+0.4){
-        v=prevV+0.4;
+      if(prevV!==null && t>420 && v>prevV+1.0){
+        v=prevV+1.0;
       }
 
-      if(prevV!==null && v<prevV-0.8){
-        v=prevV-0.8;
+      if(prevV!==null && t>480 && v<prevV-0.6){
+        v=prevV-0.6;
       }
 
       out.push({t:t,v:v});
@@ -221,14 +226,16 @@ function smooth(r){
   return r.map((p,i)=>{
     let vals=[];
 
-    for(let j=i-7;j<=i+7;j++){
+    let range = p.t < 360 ? 2 : 4;
+
+    for(let j=i-range;j<=i+range;j++){
       if(r[j])vals.push(r[j].v);
     }
 
     let avg=vals.reduce((a,b)=>a+b,0)/vals.length;
 
     if(avg<0)avg=0;
-    if(avg>13)avg=13;
+    if(avg>30)avg=30;
 
     return {t:p.t,v:avg};
   });
@@ -488,7 +495,7 @@ function draw(){
 
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("Stable RoR strong / Fixed Axis / Click BT edit-delete / BT +/-1 Power-Fan +/-5",L+10,T+18);
+  ctx.fillText("RoR End Fix / Balanced Smooth / Fixed Axis / Click BT edit-delete",L+10,T+18);
 }
 
 c.addEventListener("click",function(e){
