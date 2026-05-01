@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v6 Stable RoR</title>
-
+<title>RM500 Artisan Pro v6 Strong RoR</title>
 <style>
-body{margin:0;background:#f5f5f5;font-family:Arial}
+body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
-button{padding:10px;margin:4px;border-radius:8px;border:0;background:#222;color:#fff}
-input{padding:8px;margin:4px;width:70px}
+button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff}
+.event{background:#8a4b08}
+input,select{padding:8px;margin:4px}
 #time{font-size:42px;text-align:center}
 canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
+.metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
 </style>
 </head>
 
@@ -22,27 +23,53 @@ canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:poin
 <button onclick="start()">Start</button>
 <button onclick="stop()">Stop</button>
 <button onclick="resetTimer()">Reset</button>
+<button onclick="shift(-10)">-10s</button>
 <button onclick="shift(-5)">-5s</button>
 <button onclick="shift(5)">+5s</button>
+<button onclick="shift(10)">+10s</button>
 </div>
 
 <div class="card">
 BT
-<button onclick="step('bt',-1)">-</button>
-<input id="bt">
-<button onclick="step('bt',1)">+</button>
+<button onclick="stepInput('bt',-1)">-1</button>
+<input id="bt" type="number" step="1">
+<button onclick="stepInput('bt',1)">+1</button>
 
-PW
-<button onclick="step('pw',-5)">-</button>
-<input id="pw">
-<button onclick="step('pw',5)">+</button>
+Power
+<button onclick="stepInput('pw',-5)">-5</button>
+<input id="pw" type="number" step="5">
+<button onclick="stepInput('pw',5)">+5</button>
 
-FAN
-<button onclick="step('fan',-5)">-</button>
-<input id="fan">
-<button onclick="step('fan',5)">+</button>
+Fan
+<button onclick="stepInput('fan',-5)">-5</button>
+<input id="fan" type="number" step="5">
+<button onclick="stepInput('fan',5)">+5</button>
 
 <button onclick="save()">Save</button>
+</div>
+
+<div class="card">
+<button class="event" onclick="mark('Charge')">Charge</button>
+<button class="event" onclick="mark('Bottom')">Bottom</button>
+<button class="event" onclick="mark('GC')">GC</button>
+<button class="event" onclick="mark('FC')">1C</button>
+<button class="event" onclick="mark('Drop')">Drop</button>
+</div>
+
+<div class="card">
+<span class="metric">Dry <b id="dry">-</b></span>
+<span class="metric">Maillard <b id="mai">-</b></span>
+<span class="metric">Dev <b id="dev">-</b></span>
+</div>
+
+<div class="card">
+Profile <input id="profileName">
+<button onclick="saveProfile()">Save</button>
+<select id="profiles"></select>
+<button onclick="loadProfile()">Load</button>
+<button onclick="compare()">Compare</button>
+<button onclick="clearCompare()">Clear Compare</button>
+<button onclick="exportCSV()">CSV</button>
 </div>
 
 <div class="card">
@@ -51,160 +78,570 @@ FAN
 
 <script>
 let running=false,startT=0,base=0;
-let rows=[],hit=[];
+let rows=[],events={},compareData=[];
+let hitTargets=[];
 
 const ctx=c.getContext("2d");
+const timeEl=document.getElementById("time");
 
-function now(){return running?base+Math.floor((Date.now()-startT)/1000):base}
-function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
+function now(){
+  return running ? base + Math.floor((Date.now()-startT)/1000) : base;
+}
 
-function start(){if(running)return;running=true;startT=Date.now();loop()}
-function stop(){base=now();running=false;draw()}
-function resetTimer(){base=0;running=false;draw()}
-function shift(d){base=Math.max(0,now()+d);if(running)startT=Date.now();draw()}
+function fmt(s){
+  s=Math.max(0,Math.floor(s));
+  let m=Math.floor(s/60);
+  let sec=s%60;
+  return m+":"+("0"+sec).slice(-2);
+}
 
-function loop(){time.innerText=fmt(now());draw();if(running)requestAnimationFrame(loop)}
+function start(){
+  if(running)return;
+  running=true;
+  startT=Date.now();
+  loop();
+}
 
-function step(id,val){
-let e=document.getElementById(id);
-let v=parseFloat(e.value)||0;
-e.value=v+val;
+function stop(){
+  base=now();
+  running=false;
+  timeEl.innerText=fmt(base);
+  draw();
+}
+
+function resetTimer(){
+  base=0;
+  running=false;
+  timeEl.innerText="0:00";
+  draw();
+}
+
+function shift(d){
+  base=Math.max(0,now()+d);
+  if(running)startT=Date.now();
+  timeEl.innerText=fmt(base);
+  draw();
+}
+
+function loop(){
+  timeEl.innerText=fmt(now());
+  draw();
+  if(running)requestAnimationFrame(loop);
+}
+
+function stepInput(id,step){
+  let el=document.getElementById(id);
+  let v=parseFloat(el.value);
+  if(isNaN(v))v=0;
+  el.value=v+step;
 }
 
 function save(){
-rows.push({
-t:now(),
-bt:parseFloat(bt.value),
-pw:parseFloat(pw.value),
-fan:parseFloat(fan.value)
-});
-rows.sort((a,b)=>a.t-b.t);
-draw();
+  let t=now();
+  let btVal=parseFloat(bt.value);
+  let pwVal=parseFloat(pw.value);
+  let fanVal=parseFloat(fan.value);
+
+  if(isNaN(btVal)&&isNaN(pwVal)&&isNaN(fanVal))return;
+
+  rows.push({
+    t:t,
+    bt:btVal,
+    pw:pwVal,
+    fan:fanVal,
+    id:Date.now()+"_"+Math.random()
+  });
+
+  rows.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
-function btRows(){return rows.filter(r=>!isNaN(r.bt))}
-
-function interp(t){
-let b=btRows();
-if(b.length<2)return null;
-
-for(let i=1;i<b.length;i++){
-let p=b[i-1],c=b[i];
-if(p.t<=t&&t<=c.t){
-let r=(t-p.t)/(c.t-p.t);
-return p.bt+(c.bt-p.bt)*r;
-}}
-return b[b.length-1].bt;
+function mark(n){
+  events[n]=now();
+  draw();
 }
 
-/* 🔥 安定版RoR */
-function ror(){
-let out=[];
-for(let t=30;t<=840;t+=5){
-let a=interp(t),b=interp(t-30);
-if(a!=null&&b!=null){
-
-let v=(a-b)/0.5;
-
-/* 跳ね防止 */
-v=Math.max(0,Math.min(18,v));
-
-out.push({t,v});
-}}
-return smooth(out);
+function btRows(src=rows){
+  return src.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
 }
 
-/* 🔥 強スムージング */
+function interp(sec,src=rows){
+  let b=btRows(src);
+  if(b.length<2)return null;
+  if(sec<b[0].t)return null;
+  if(sec>=b[b.length-1].t)return b[b.length-1].bt;
+
+  for(let i=1;i<b.length;i++){
+    let p=b[i-1];
+    let c=b[i];
+
+    if(p.t<=sec && sec<=c.t){
+      let span=c.t-p.t;
+      if(span<=0)return c.bt;
+      let r=(sec-p.t)/span;
+      return p.bt+(c.bt-p.bt)*r;
+    }
+  }
+
+  return null;
+}
+
+/* 強めRoR安定化 */
+function ror(src=rows){
+  let out=[];
+  let prevV=null;
+
+  for(let t=30;t<=14*60;t+=5){
+    let a=interp(t,src);
+    let b=interp(t-30,src);
+
+    if(a!=null&&b!=null){
+      let v=(a-b)/0.5;
+
+      if(v<0)v=0;
+      if(v>14)v=14;
+
+      if(prevV!==null && v>prevV+0.4){
+        v=prevV+0.4;
+      }
+
+      if(prevV!==null && v<prevV-0.8){
+        v=prevV-0.8;
+      }
+
+      out.push({t:t,v:v});
+      prevV=v;
+    }
+  }
+
+  return smooth(out);
+}
+
 function smooth(r){
-return r.map((p,i)=>{
-let vals=[];
-for(let j=i-4;j<=i+4;j++){
-if(r[j])vals.push(r[j].v);
+  return r.map((p,i)=>{
+    let vals=[];
+
+    for(let j=i-7;j<=i+7;j++){
+      if(r[j])vals.push(r[j].v);
+    }
+
+    let avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+
+    if(avg<0)avg=0;
+    if(avg>13)avg=13;
+
+    return {t:p.t,v:avg};
+  });
 }
-return {t:p.t,v:vals.reduce((a,b)=>a+b)/vals.length};
-});
+
+function phase(){
+  let s=events.Charge||0;
+  let g=events.GC;
+  let f=events.FC;
+  let d=events.Drop;
+
+  if(!g||!f||!d)return;
+
+  let tot=d-s;
+  if(tot<=0)return;
+
+  dry.innerText=((g-s)/tot*100).toFixed(0)+"%";
+  mai.innerText=((f-g)/tot*100).toFixed(0)+"%";
+  dev.innerText=((d-f)/tot*100).toFixed(0)+"%";
+}
+
+function stepLine(points,key,x,y){
+  if(!points.length)return;
+
+  ctx.beginPath();
+  let prev=points[0];
+  ctx.moveTo(x(prev.t),y(prev[key]));
+
+  for(let i=1;i<points.length;i++){
+    let cur=points[i];
+    ctx.lineTo(x(cur.t),y(prev[key]));
+    ctx.lineTo(x(cur.t),y(cur[key]));
+    prev=cur;
+  }
+
+  ctx.stroke();
 }
 
 function draw(){
-hit=[];
-ctx.clearRect(0,0,c.width,c.height);
+  phase();
+  hitTargets=[];
+  ctx.clearRect(0,0,c.width,c.height);
 
-let L=70,W=1000,H=430,T=25;
+  let L=70,T=25,R=80,B=70;
+  let W=c.width-L-R;
+  let H=c.height-T-B;
 
-let x=t=>L+(t/840)*W;
-let y=v=>T+H-(v/230)*H;
-let yR=v=>T+H-(v/30)*H;
+  let maxTime=14*60;
+  let maxTemp=230;
+  let maxRor=30;
 
-/* grid */
-for(let i=0;i<=230;i+=10){
-let yy=y(i);
-ctx.strokeStyle="#eee";
-ctx.beginPath();
-ctx.moveTo(L,yy);
-ctx.lineTo(L+W,yy);
-ctx.stroke();
+  let x=t=>L+(t/maxTime)*W;
+  let yBT=v=>T+H-(v/maxTemp)*H;
+  let yRor=v=>T+H-(Math.max(0,Math.min(maxRor,v))/maxRor)*H;
+
+  let pfTop=T+H*(2/3);
+  let pfH=H/3;
+  let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
+
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,c.width,c.height);
+
+  ctx.font="13px Arial";
+  ctx.textBaseline="middle";
+
+  for(let temp=0;temp<=230;temp+=5){
+    let y=yBT(temp);
+    ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(L,y);
+    ctx.lineTo(L+W,y);
+    ctx.stroke();
+
+    if(temp%10===0){
+      ctx.fillStyle="#000";
+      ctx.fillText(temp+"C",10,y);
+    }
+  }
+
+  for(let sec=0;sec<=maxTime;sec+=30){
+    let xx=x(sec);
+    ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f3f3f3";
+    ctx.beginPath();
+    ctx.moveTo(xx,T);
+    ctx.lineTo(xx,T+H);
+    ctx.stroke();
+
+    if(sec%60===0){
+      ctx.fillStyle="#000";
+      ctx.fillText((sec/60)+"m",xx-10,T+H+25);
+    }
+  }
+
+  ctx.strokeStyle="#000";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(L,T);
+  ctx.lineTo(L,T+H);
+  ctx.lineTo(L+W,T+H);
+  ctx.stroke();
+
+  ctx.fillStyle="#666";
+  ctx.font="12px Arial";
+  for(let r=0;r<=30;r+=5){
+    let y=yRor(r);
+    ctx.fillText(r,L+W+12,y);
+  }
+  ctx.fillText("RoR",L+W+12,T+12);
+
+  ctx.strokeStyle="rgba(0,0,0,0.25)";
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.moveTo(L,pfTop);
+  ctx.lineTo(L+W,pfTop);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle="#666";
+  ctx.font="13px Arial";
+  ctx.fillText("Power / Fan zone",L+8,pfTop+14);
+
+  compareData.forEach(src=>{
+    let b=btRows(src);
+    if(!b.length)return;
+
+    ctx.save();
+    ctx.globalAlpha=0.35;
+    ctx.strokeStyle="blue";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+
+    b.forEach((p,i)=>{
+      if(p.t<0||p.t>maxTime)return;
+      let xx=x(p.t);
+      let yy=yBT(p.bt);
+
+      if(i===0)ctx.moveTo(xx,yy);
+      else ctx.lineTo(xx,yy);
+    });
+
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  let b=btRows(rows);
+
+  if(b.length){
+    ctx.strokeStyle="black";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+
+    b.forEach((p,i)=>{
+      if(p.t<0||p.t>maxTime)return;
+      let xx=x(p.t);
+      let yy=yBT(p.bt);
+
+      if(i===0)ctx.moveTo(xx,yy);
+      else ctx.lineTo(xx,yy);
+    });
+
+    ctx.stroke();
+
+    ctx.fillStyle="black";
+    ctx.font="14px Arial";
+
+    b.forEach(p=>{
+      if(p.t<0||p.t>maxTime)return;
+
+      let xx=x(p.t);
+      let yy=yBT(p.bt);
+
+      ctx.beginPath();
+      ctx.arc(xx,yy,5,0,Math.PI*2);
+      ctx.fill();
+
+      ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-10);
+
+      hitTargets.push({
+        row:p,
+        x:xx,
+        y:yy,
+        labelX:xx+7,
+        labelY:yy-10,
+        radius:30
+      });
+    });
+  }
+
+  let rr=ror(rows);
+
+  if(rr.length){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="orange";
+    ctx.lineWidth=3;
+    ctx.beginPath();
+
+    rr.forEach((p,i)=>{
+      if(p.t<0||p.t>maxTime)return;
+
+      let xx=x(p.t);
+      let yy=yRor(p.v);
+
+      if(i===0)ctx.moveTo(xx,yy);
+      else ctx.lineTo(xx,yy);
+    });
+
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  let pwData=rows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
+
+  if(pwData.length){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="red";
+    ctx.lineWidth=3;
+    stepLine(pwData,"pw",x,yPF);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  let fanData=rows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
+
+  if(fanData.length){
+    ctx.save();
+    ctx.globalAlpha=0.5;
+    ctx.strokeStyle="blue";
+    ctx.lineWidth=3;
+    stepLine(fanData,"fan",x,yPF);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  Object.keys(events).forEach(name=>{
+    let t=events[name];
+    if(t<0||t>maxTime)return;
+
+    let xx=x(t);
+
+    ctx.strokeStyle="#b36b00";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(xx,T);
+    ctx.lineTo(xx,T+H);
+    ctx.stroke();
+
+    ctx.fillStyle="#b36b00";
+    ctx.save();
+    ctx.translate(xx+6,T+25);
+    ctx.rotate(Math.PI/2);
+    ctx.fillText(name+" "+fmt(t),0,0);
+    ctx.restore();
+  });
+
+  ctx.fillStyle="#000";
+  ctx.font="14px Arial";
+  ctx.fillText("Stable RoR strong / Fixed Axis / Click BT edit-delete / BT +/-1 Power-Fan +/-5",L+10,T+18);
 }
 
-for(let s=0;s<=840;s+=30){
-let xx=x(s);
-ctx.strokeStyle="#ddd";
-ctx.beginPath();
-ctx.moveTo(xx,T);
-ctx.lineTo(xx,T+H);
-ctx.stroke();
-}
+c.addEventListener("click",function(e){
+  let rect=c.getBoundingClientRect();
+  let sx=c.width/rect.width;
+  let sy=c.height/rect.height;
 
-/* BT */
-let b=btRows();
-ctx.beginPath();
-b.forEach((p,i)=>{
-let xx=x(p.t),yy=y(p.bt);
-if(i==0)ctx.moveTo(xx,yy);
-else ctx.lineTo(xx,yy);
+  let mx=(e.clientX-rect.left)*sx;
+  let my=(e.clientY-rect.top)*sy;
+
+  let candidates=hitTargets.map(h=>{
+    let d1=Math.hypot(mx-h.x,my-h.y);
+    let d2=Math.hypot(mx-h.labelX,my-h.labelY);
+    return {h:h,d:Math.min(d1,d2)};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(!candidates.length)return;
+
+  candidates.sort((a,b)=>a.d-b.d);
+  editPoint(candidates[0].h.row);
 });
-ctx.strokeStyle="#000";
-ctx.stroke();
 
-/* 点 */
-b.forEach(p=>{
-let xx=x(p.t),yy=y(p.bt);
-ctx.beginPath();
-ctx.arc(xx,yy,5,0,Math.PI*2);
-ctx.fill();
+function parseTime(v){
+  v=String(v).trim();
 
-hit.push({p,xx,yy});
-});
+  if(v.includes(":")){
+    let p=v.split(":");
+    if(p.length!==2)return null;
 
-/* RoR */
-let rr=ror();
-ctx.beginPath();
-rr.forEach((p,i)=>{
-let xx=x(p.t),yy=yR(p.v);
-if(i==0)ctx.moveTo(xx,yy);
-else ctx.lineTo(xx,yy);
-});
-ctx.strokeStyle="orange";
-ctx.globalAlpha=0.5;
-ctx.stroke();
-ctx.globalAlpha=1;
+    let m=parseInt(p[0],10);
+    let s=parseInt(p[1],10);
+
+    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
+    return m*60+s;
+  }
+
+  let n=parseFloat(v);
+  if(isNaN(n))return null;
+  return Math.max(0,Math.floor(n));
 }
 
-/* 点クリック編集 */
-c.onclick=e=>{
-let rect=c.getBoundingClientRect();
-let mx=e.clientX-rect.left;
-let my=e.clientY-rect.top;
+function editPoint(row){
+  let action=prompt("edit or delete", "edit");
+  if(action===null)return;
 
-hit.forEach(h=>{
-if(Math.hypot(mx-h.xx,my-h.yy)<10){
-let val=prompt("BT",h.p.bt);
-if(val==="del"){rows=rows.filter(r=>r!==h.p)}
-else if(val!=null){h.p.bt=parseFloat(val)}
-draw();
-}
-});
+  if(action.toLowerCase()==="delete"){
+    let idx=rows.indexOf(row);
+    if(idx>=0)rows.splice(idx,1);
+    draw();
+    return;
+  }
+
+  let newTime=prompt("Time mm:ss",fmt(row.t));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  let newBT=prompt("BT",isNaN(row.bt)?"":row.bt);
+  if(newBT===null)return;
+
+  let newPower=prompt("Power",isNaN(row.pw)?"":row.pw);
+  if(newPower===null)return;
+
+  let newFan=prompt("Fan",isNaN(row.fan)?"":row.fan);
+  if(newFan===null)return;
+
+  row.t=parsed;
+  row.bt=newBT===""?NaN:parseFloat(newBT);
+  row.pw=newPower===""?NaN:parseFloat(newPower);
+  row.fan=newFan===""?NaN:parseFloat(newFan);
+
+  rows.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
+function saveProfile(){
+  let name=profileName.value||"profile_"+Date.now();
+  localStorage.setItem(name,JSON.stringify({
+    rows:rows,
+    events:events
+  }));
+  loadList();
+}
+
+function loadProfile(){
+  let name=profiles.value;
+  if(!name)return;
+
+  let p=JSON.parse(localStorage.getItem(name));
+  rows=p.rows||[];
+  events=p.events||{};
+  draw();
+}
+
+function compare(){
+  let name=profiles.value;
+  if(!name)return;
+
+  let p=JSON.parse(localStorage.getItem(name));
+  compareData.push(p.rows||[]);
+  draw();
+}
+
+function clearCompare(){
+  compareData=[];
+  draw();
+}
+
+function loadList(){
+  profiles.innerHTML="";
+  Object.keys(localStorage).forEach(k=>{
+    profiles.innerHTML+=`<option value="${k}">${k}</option>`;
+  });
+}
+
+function exportCSV(){
+  let csv="Time,Seconds,BT,Power,Fan,RoR\n";
+  let rr=ror(rows);
+
+  rows.forEach(r=>{
+    let nearest="";
+    let best=null;
+    let bestDiff=99999;
+
+    rr.forEach(x=>{
+      let diff=Math.abs(x.t-r.t);
+      if(diff<bestDiff){
+        bestDiff=diff;
+        best=x;
+      }
+    });
+
+    if(best)nearest=best.v.toFixed(2);
+
+    csv+=fmt(r.t)+","+r.t+","+r.bt+","+r.pw+","+r.fan+","+nearest+"\n";
+  });
+
+  csv+="\nEvents\n";
+  Object.keys(events).forEach(k=>{
+    csv+=k+","+fmt(events[k])+","+events[k]+"\n";
+  });
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download="artisan_rm500.csv";
+  a.click();
+}
+
+loadList();
 draw();
 </script>
 
