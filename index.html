@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v5 Fixed Axis</title>
-
+<title>RM500 Artisan Pro v6 Edit</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -12,7 +11,7 @@ button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:
 .event{background:#8a4b08}
 input,select{padding:8px;margin:4px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:520px;border:2px solid #000;background:#fff}
+canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
 .metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
 </style>
 </head>
@@ -25,13 +24,27 @@ canvas{width:100%;height:520px;border:2px solid #000;background:#fff}
 <button onclick="stop()">Stop</button>
 <button onclick="resetTimer()">Reset</button>
 <button onclick="shift(-10)">-10s</button>
+<button onclick="shift(-5)">-5s</button>
+<button onclick="shift(5)">+5s</button>
 <button onclick="shift(10)">+10s</button>
 </div>
 
 <div class="card">
-BT <input id="bt">
-Power <input id="pw">
-Fan <input id="fan">
+BT
+<button onclick="stepInput('bt',-1)">-1</button>
+<input id="bt" type="number" step="1">
+<button onclick="stepInput('bt',1)">+1</button>
+
+Power
+<button onclick="stepInput('pw',-5)">-5</button>
+<input id="pw" type="number" step="5">
+<button onclick="stepInput('pw',5)">+5</button>
+
+Fan
+<button onclick="stepInput('fan',-5)">-5</button>
+<input id="fan" type="number" step="5">
+<button onclick="stepInput('fan',5)">+5</button>
+
 <button onclick="save()">Save</button>
 </div>
 
@@ -66,6 +79,7 @@ Profile <input id="profileName">
 <script>
 let running=false,startT=0,base=0;
 let rows=[],events={},compareData=[];
+let hitTargets=[];
 
 const ctx=c.getContext("2d");
 const timeEl=document.getElementById("time");
@@ -115,6 +129,13 @@ function loop(){
   if(running)requestAnimationFrame(loop);
 }
 
+function stepInput(id,step){
+  let el=document.getElementById(id);
+  let v=parseFloat(el.value);
+  if(isNaN(v))v=0;
+  el.value=v+step;
+}
+
 function save(){
   let t=now();
   let btVal=parseFloat(bt.value);
@@ -147,7 +168,6 @@ function btRows(src=rows){
 function interp(sec,src=rows){
   let b=btRows(src);
   if(b.length<2)return null;
-
   if(sec<b[0].t)return null;
   if(sec>=b[b.length-1].t)return b[b.length-1].bt;
 
@@ -232,6 +252,7 @@ function stepLine(points,key,x,y){
 
 function draw(){
   phase();
+  hitTargets=[];
   ctx.clearRect(0,0,c.width,c.height);
 
   let L=70,T=25,R=80,B=70;
@@ -256,10 +277,8 @@ function draw(){
   ctx.font="13px Arial";
   ctx.textBaseline="middle";
 
-  // temperature axis 0-230C
   for(let temp=0;temp<=230;temp+=5){
     let y=yBT(temp);
-
     ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
     ctx.lineWidth=1;
     ctx.beginPath();
@@ -273,10 +292,8 @@ function draw(){
     }
   }
 
-  // time axis 0-14min / 30sec
   for(let sec=0;sec<=maxTime;sec+=30){
     let xx=x(sec);
-
     ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f3f3f3";
     ctx.beginPath();
     ctx.moveTo(xx,T);
@@ -289,7 +306,6 @@ function draw(){
     }
   }
 
-  // axes
   ctx.strokeStyle="#000";
   ctx.lineWidth=2;
   ctx.beginPath();
@@ -298,7 +314,6 @@ function draw(){
   ctx.lineTo(L+W,T+H);
   ctx.stroke();
 
-  // RoR right axis 0-30
   ctx.fillStyle="#666";
   ctx.font="12px Arial";
   for(let r=0;r<=30;r+=5){
@@ -307,7 +322,6 @@ function draw(){
   }
   ctx.fillText("RoR",L+W+12,T+12);
 
-  // Power/Fan lower 1/3 guide
   ctx.strokeStyle="rgba(0,0,0,0.25)";
   ctx.setLineDash([4,4]);
   ctx.beginPath();
@@ -320,7 +334,6 @@ function draw(){
   ctx.font="13px Arial";
   ctx.fillText("Power / Fan zone",L+8,pfTop+14);
 
-  // compare lines
   compareData.forEach(src=>{
     let b=btRows(src);
     if(!b.length)return;
@@ -344,7 +357,6 @@ function draw(){
     ctx.restore();
   });
 
-  // BT line
   let b=btRows(rows);
 
   if(b.length){
@@ -377,10 +389,18 @@ function draw(){
       ctx.fill();
 
       ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-10);
+
+      hitTargets.push({
+        row:p,
+        x:xx,
+        y:yy,
+        labelX:xx+7,
+        labelY:yy-10,
+        radius:30
+      });
     });
   }
 
-  // RoR
   let rr=ror(rows);
 
   if(rr.length){
@@ -404,7 +424,6 @@ function draw(){
     ctx.restore();
   }
 
-  // Power step line
   let pwData=rows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
 
   if(pwData.length){
@@ -417,7 +436,6 @@ function draw(){
     ctx.restore();
   }
 
-  // Fan step line
   let fanData=rows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
 
   if(fanData.length){
@@ -430,7 +448,6 @@ function draw(){
     ctx.restore();
   }
 
-  // event lines
   Object.keys(events).forEach(name=>{
     let t=events[name];
     if(t<0||t>maxTime)return;
@@ -452,10 +469,86 @@ function draw(){
     ctx.restore();
   });
 
-  // legend
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("Fixed Axis: 0-14min / 0-230C / RoR 0-30 / Power red / Fan blue / Compare blue",L+10,T+18);
+  ctx.fillText("Fixed Axis + Click BT edit/delete + BT +/-1 Power/Fan +/-5 + Timer +/-5s",L+10,T+18);
+}
+
+c.addEventListener("click",function(e){
+  let rect=c.getBoundingClientRect();
+  let sx=c.width/rect.width;
+  let sy=c.height/rect.height;
+
+  let mx=(e.clientX-rect.left)*sx;
+  let my=(e.clientY-rect.top)*sy;
+
+  let candidates=hitTargets.map(h=>{
+    let d1=Math.hypot(mx-h.x,my-h.y);
+    let d2=Math.hypot(mx-h.labelX,my-h.labelY);
+    return {h:h,d:Math.min(d1,d2)};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(!candidates.length)return;
+
+  candidates.sort((a,b)=>a.d-b.d);
+  editPoint(candidates[0].h.row);
+});
+
+function parseTime(v){
+  v=String(v).trim();
+
+  if(v.includes(":")){
+    let p=v.split(":");
+    if(p.length!==2)return null;
+
+    let m=parseInt(p[0],10);
+    let s=parseInt(p[1],10);
+
+    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
+    return m*60+s;
+  }
+
+  let n=parseFloat(v);
+  if(isNaN(n))return null;
+  return Math.max(0,Math.floor(n));
+}
+
+function editPoint(row){
+  let action=prompt("edit or delete", "edit");
+  if(action===null)return;
+
+  if(action.toLowerCase()==="delete"){
+    let idx=rows.indexOf(row);
+    if(idx>=0)rows.splice(idx,1);
+    draw();
+    return;
+  }
+
+  let newTime=prompt("Time mm:ss",fmt(row.t));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  let newBT=prompt("BT",isNaN(row.bt)?"":row.bt);
+  if(newBT===null)return;
+
+  let newPower=prompt("Power",isNaN(row.pw)?"":row.pw);
+  if(newPower===null)return;
+
+  let newFan=prompt("Fan",isNaN(row.fan)?"":row.fan);
+  if(newFan===null)return;
+
+  row.t=parsed;
+  row.bt=newBT===""?NaN:parseFloat(newBT);
+  row.pw=newPower===""?NaN:parseFloat(newPower);
+  row.fan=newFan===""?NaN:parseFloat(newFan);
+
+  rows.sort((a,b)=>a.t-b.t);
+  draw();
 }
 
 function saveProfile(){
