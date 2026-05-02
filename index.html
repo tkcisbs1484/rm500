@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Pro v11 Input Label Fix</title>
+<title>RM500 Pro v12 Edit BT Power Fan</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
@@ -15,21 +15,9 @@ button{padding:8px;border:0;border-radius:6px;background:#222;color:#fff;margin:
 input,select{padding:6px;margin:2px}
 #time{font-size:32px;text-align:center}
 canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
-
-.inputRow{
-  display:grid;
-  grid-template-columns:50px 1fr;
-  align-items:center;
-  gap:6px;
-  margin:6px 0;
-}
-.inputRow label{
-  font-weight:bold;
-  text-align:right;
-}
-.inputRow input{
-  width:160px;
-}
+.inputRow{display:grid;grid-template-columns:50px auto auto auto;align-items:center;gap:6px;margin:6px 0}
+.inputRow label{font-weight:bold;text-align:right}
+.inputRow input{width:120px}
 </style>
 </head>
 
@@ -61,15 +49,21 @@ Profile
 <div class="card">
 <div class="inputRow">
   <label for="bt">BT</label>
+  <button onclick="stepInput('bt',-1)">-1</button>
   <input id="bt">
+  <button onclick="stepInput('bt',1)">+1</button>
 </div>
 <div class="inputRow">
   <label for="pw">PW</label>
+  <button onclick="stepInput('pw',-5)">-5</button>
   <input id="pw">
+  <button onclick="stepInput('pw',5)">+5</button>
 </div>
 <div class="inputRow">
   <label for="fan">FAN</label>
+  <button onclick="stepInput('fan',-5)">-5</button>
   <input id="fan">
+  <button onclick="stepInput('fan',5)">+5</button>
 </div>
 <button onclick="save()">Save</button>
 </div>
@@ -85,8 +79,8 @@ Profile
 </div>
 
 <div class="card">
-<button onclick="editSel()">編集</button>
-<button class="red" onclick="delSel()">削除</button>
+<button onclick="editSel()">選択点を編集</button>
+<button class="red" onclick="delSel()">選択点を削除</button>
 <span id="sel">未選択</span>
 </div>
 
@@ -150,6 +144,13 @@ function loop(){
   timeEl.innerText=fmt(now());
   draw();
   if(running)requestAnimationFrame(loop);
+}
+
+function stepInput(id,step){
+  let el=document.getElementById(id);
+  let v=parseFloat(el.value);
+  if(isNaN(v))v=0;
+  el.value=v+step;
 }
 
 function save(){
@@ -308,6 +309,8 @@ function draw(){
     ctx.arc(xx,yy,5,0,Math.PI*2);
     ctx.fill();
 
+    ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-10);
+
     if(selected===p){
       ctx.strokeStyle="red";
       ctx.lineWidth=3;
@@ -418,22 +421,82 @@ canvas.onclick=e=>{
   let mx=(e.clientX-rect.left)*(canvas.width/rect.width);
   let my=(e.clientY-rect.top)*(canvas.height/rect.height);
 
-  btRows().forEach(p=>{
-    let xx=60+(p.t/840)*1050;
-    let yy=25+420-(p.bt/230)*420;
+  selected=null;
 
-    if(Math.hypot(mx-xx,my-yy)<10){
-      selected=p;
-      selEl.innerText="BT "+p.bt;
+  rows.forEach(p=>{
+    let xx=60+(p.t/840)*1050;
+
+    let candidates=[];
+
+    if(!isNaN(p.bt)){
+      candidates.push({type:"BT",x:xx,y:25+420-(p.bt/230)*420});
     }
+
+    let pfTop=25+420*(2/3);
+    let pfH=420/3;
+
+    if(!isNaN(p.pw)){
+      candidates.push({type:"PW",x:xx,y:pfTop+pfH-(Math.max(0,Math.min(100,p.pw))/100)*pfH});
+    }
+
+    if(!isNaN(p.fan)){
+      candidates.push({type:"FAN",x:xx,y:pfTop+pfH-(Math.max(0,Math.min(100,p.fan))/100)*pfH});
+    }
+
+    candidates.forEach(ca=>{
+      if(Math.hypot(mx-ca.x,my-ca.y)<12){
+        selected=p;
+        selEl.innerText="選択中 "+ca.type+" / BT:"+p.bt+" PW:"+p.pw+" FAN:"+p.fan+" / "+fmt(p.t);
+      }
+    });
   });
+
   draw();
+}
+
+function parseTime(v){
+  v=String(v).trim();
+  if(v.includes(":")){
+    let p=v.split(":");
+    if(p.length!==2)return null;
+    let m=parseInt(p[0],10);
+    let s=parseInt(p[1],10);
+    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
+    return m*60+s;
+  }
+  let n=parseFloat(v);
+  if(isNaN(n))return null;
+  return Math.max(0,Math.floor(n));
 }
 
 function editSel(){
   if(!selected)return;
-  let v=prompt("BT",selected.bt);
-  if(v!=null)selected.bt=parseFloat(v);
+
+  let newTime=prompt("Time mm:ss",fmt(selected.t));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  let newBT=prompt("BT",isNaN(selected.bt)?"":selected.bt);
+  if(newBT===null)return;
+
+  let newPW=prompt("PW",isNaN(selected.pw)?"":selected.pw);
+  if(newPW===null)return;
+
+  let newFAN=prompt("FAN",isNaN(selected.fan)?"":selected.fan);
+  if(newFAN===null)return;
+
+  selected.t=parsed;
+  selected.bt=newBT===""?NaN:parseFloat(newBT);
+  selected.pw=newPW===""?NaN:parseFloat(newPW);
+  selected.fan=newFAN===""?NaN:parseFloat(newFAN);
+
+  rows.sort((a,b)=>a.t-b.t);
+  selEl.innerText="選択中 / BT:"+selected.bt+" PW:"+selected.pw+" FAN:"+selected.fan+" / "+fmt(selected.t);
   draw();
 }
 
@@ -455,6 +518,8 @@ function loadProfile(){
   let p=JSON.parse(localStorage.getItem(profiles.value));
   rows=p.rows||[];
   events=p.events||{};
+  selected=null;
+  selEl.innerText="未選択";
   draw();
 }
 
