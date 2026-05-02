@@ -3,18 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v9 Event Dots</title>
+<title>RM500 Artisan Pro v10 Gaussian RoR</title>
+
 <style>
-body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
+body{margin:0;background:#f5f5f5;font-family:Arial}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
-button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff}
-.event{background:#8a4b08}
+button{padding:10px;margin:4px;border-radius:8px;border:0;background:#222;color:#fff}
 .red{background:#9b1c1c}
-input,select{padding:8px;margin:4px}
+input{padding:8px;margin:4px;width:70px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:540px;border:2px solid #000;background:#fff;cursor:pointer}
-.metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
-.small{font-size:12px;color:#666}
+canvas{width:100%;height:560px;border:2px solid #000;background:#fff;cursor:pointer}
+.metric{display:inline-block;background:#eee;padding:6px;margin:4px;border-radius:6px}
 </style>
 </head>
 
@@ -25,44 +24,35 @@ canvas{width:100%;height:540px;border:2px solid #000;background:#fff;cursor:poin
 <button onclick="start()">Start</button>
 <button onclick="stop()">Stop</button>
 <button onclick="resetTimer()">Reset</button>
-<button onclick="shift(-10)">-10s</button>
 <button onclick="shift(-5)">-5s</button>
 <button onclick="shift(5)">+5s</button>
-<button onclick="shift(10)">+10s</button>
 </div>
 
 <div class="card">
-BT
-<button onclick="stepInput('bt',-1)">-1</button>
-<input id="bt" type="number" step="1">
-<button onclick="stepInput('bt',1)">+1</button>
+BT <button onclick="step('bt',-1)">-</button>
+<input id="bt"><button onclick="step('bt',1)">+</button>
 
-Power
-<button onclick="stepInput('pw',-5)">-5</button>
-<input id="pw" type="number" step="5">
-<button onclick="stepInput('pw',5)">+5</button>
+PW <button onclick="step('pw',-5)">-</button>
+<input id="pw"><button onclick="step('pw',5)">+</button>
 
-Fan
-<button onclick="stepInput('fan',-5)">-5</button>
-<input id="fan" type="number" step="5">
-<button onclick="stepInput('fan',5)">+5</button>
+FAN <button onclick="step('fan',-5)">-</button>
+<input id="fan"><button onclick="step('fan',5)">+</button>
 
 <button onclick="save()">Save</button>
 </div>
 
 <div class="card">
-<button class="event" onclick="mark('Charge')">Charge</button>
-<button class="event" onclick="mark('Bottom')">Bottom</button>
-<button class="event" onclick="mark('GC')">GC</button>
-<button class="event" onclick="mark('FC')">1C</button>
-<button class="event" onclick="mark('Drop')">Drop</button>
-<div class="small">イベントは縦線ではなく、茶色のドットでグラフ上に表示されます</div>
+<button onclick="mark('Charge')">Charge</button>
+<button onclick="mark('Bottom')">Bottom</button>
+<button onclick="mark('GC')">GC</button>
+<button onclick="mark('FC')">FC</button>
+<button onclick="mark('Drop')">Drop</button>
 </div>
 
 <div class="card">
-<button onclick="editSelectedPoint()">選択BTを編集</button>
-<button class="red" onclick="deleteSelectedPoint()">選択BTを消去</button>
-<span class="small" id="selectedInfo">選択中：なし</span>
+<button onclick="editSelected()">編集</button>
+<button class="red" onclick="deleteSelected()">削除</button>
+<span id="sel">未選択</span>
 </div>
 
 <div class="card">
@@ -72,691 +62,208 @@ Fan
 </div>
 
 <div class="card">
-Profile <input id="profileName">
-<button onclick="saveProfile()">Save</button>
-<select id="profiles"></select>
-<button onclick="loadProfile()">Load</button>
-<button onclick="compare()">Compare</button>
-<button onclick="clearCompare()">Clear Compare</button>
-<button onclick="exportCSV()">CSV</button>
-</div>
-
-<div class="card">
-<canvas id="c" width="1200" height="590"></canvas>
+<canvas id="c" width="1200" height="580"></canvas>
 </div>
 
 <script>
 let running=false,startT=0,base=0;
-let rows=[],events={},compareData=[];
-let hitTargets=[];
-let eventTargets=[];
-let selectedPoint=null;
+let rows=[],events={},selected=null;
+let hitBT=[],hitEV=[];
 
 const ctx=c.getContext("2d");
-const timeEl=document.getElementById("time");
 
-function now(){
-  return running ? base + Math.floor((Date.now()-startT)/1000) : base;
-}
+function now(){return running?base+Math.floor((Date.now()-startT)/1000):base}
+function fmt(s){let m=Math.floor(s/60),sec=s%60;return m+":"+("0"+sec).slice(-2)}
 
-function fmt(s){
-  s=Math.max(0,Math.floor(s));
-  let m=Math.floor(s/60);
-  let sec=s%60;
-  return m+":"+("0"+sec).slice(-2);
-}
+function start(){if(running)return;running=true;startT=Date.now();loop()}
+function stop(){base=now();running=false;draw()}
+function resetTimer(){base=0;running=false;draw()}
+function shift(d){base=Math.max(0,now()+d);if(running)startT=Date.now();draw()}
+function loop(){time.innerText=fmt(now());draw();if(running)requestAnimationFrame(loop)}
 
-function start(){
-  if(running)return;
-  running=true;
-  startT=Date.now();
-  loop();
-}
-
-function stop(){
-  base=now();
-  running=false;
-  timeEl.innerText=fmt(base);
-  draw();
-}
-
-function resetTimer(){
-  base=0;
-  running=false;
-  timeEl.innerText="0:00";
-  draw();
-}
-
-function shift(d){
-  base=Math.max(0,now()+d);
-  if(running)startT=Date.now();
-  timeEl.innerText=fmt(base);
-  draw();
-}
-
-function loop(){
-  timeEl.innerText=fmt(now());
-  draw();
-  if(running)requestAnimationFrame(loop);
-}
-
-function stepInput(id,step){
-  let el=document.getElementById(id);
-  let v=parseFloat(el.value);
-  if(isNaN(v))v=0;
-  el.value=v+step;
+function step(id,v){
+let e=document.getElementById(id);
+let val=parseFloat(e.value)||0;
+e.value=val+v;
 }
 
 function save(){
-  let t=now();
-  let btVal=parseFloat(bt.value);
-  let pwVal=parseFloat(pw.value);
-  let fanVal=parseFloat(fan.value);
-
-  if(isNaN(btVal)&&isNaN(pwVal)&&isNaN(fanVal))return;
-
-  rows.push({
-    t:t,
-    bt:btVal,
-    pw:pwVal,
-    fan:fanVal,
-    id:Date.now()+"_"+Math.random()
-  });
-
-  rows.sort((a,b)=>a.t-b.t);
-  draw();
+rows.push({
+t:now(),
+bt:parseFloat(bt.value),
+pw:parseFloat(pw.value),
+fan:parseFloat(fan.value)
+});
+rows.sort((a,b)=>a.t-b.t);
+draw();
 }
 
-function mark(n){
-  events[n]=now();
-  draw();
+function mark(n){events[n]=now();draw()}
+
+function btRows(){return rows.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t)}
+
+function interp(t){
+let b=btRows();
+if(b.length<2)return null;
+
+for(let i=1;i<b.length;i++){
+let p=b[i-1],c=b[i];
+if(p.t<=t && t<=c.t){
+let r=(t-p.t)/(c.t-p.t);
+return p.bt+(c.bt-p.bt)*r;
+}}
+return b[b.length-1].bt;
 }
 
-function btRows(src=rows){
-  return src.filter(r=>!isNaN(r.bt)).sort((a,b)=>a.t-b.t);
+/* ===== RoR ===== */
+function ror(){
+let out=[];
+let b=btRows();
+if(b.length<2)return out;
+
+let lastT=b[b.length-1].t;
+let endT=Math.min(840,lastT-5);
+
+for(let t=30;t<=endT;t+=5){
+let a=interp(t),bPrev=interp(t-30);
+if(a!=null && bPrev!=null){
+let v=(a-bPrev)/0.5;
+if(v<0)v=0;
+if(v>35)v=35;
+out.push({t,v});
+}}
+return smoothGaussian(out);
 }
 
-function interp(sec,src=rows){
-  let b=btRows(src);
-  if(b.length<2)return null;
-  if(sec<b[0].t)return null;
-  if(sec>=b[b.length-1].t)return b[b.length-1].bt;
+/* ガウススムージング */
+function smoothGaussian(r){
+return r.map((p,i)=>{
 
-  for(let i=1;i<b.length;i++){
-    let p=b[i-1];
-    let c=b[i];
+let vals=[],weights=[];
+let range = p.t<360?2:(p.t<420?4:8);
 
-    if(p.t<=sec && sec<=c.t){
-      let span=c.t-p.t;
-      if(span<=0)return c.bt;
-      let r=(sec-p.t)/span;
-      return p.bt+(c.bt-p.bt)*r;
-    }
-  }
+for(let j=-range;j<=range;j++){
+if(r[i+j]){
+let d=Math.abs(j);
+let w=Math.exp(-(d*d)/(2*(range/2)*(range/2)));
+vals.push(r[i+j].v*w);
+weights.push(w);
+}}
 
-  return null;
+let avg=vals.reduce((a,b)=>a+b,0)/weights.reduce((a,b)=>a+b,0);
+if(avg<0)avg=0;
+if(avg>30)avg=30;
+
+return {t:p.t,v:avg};
+});
 }
 
-function ror(src=rows){
-  let out=[];
-  let prevV=null;
-  let b=btRows(src);
-
-  if(b.length<2)return out;
-
-  let lastT=b[b.length-1].t;
-  let endT=Math.min(14*60,lastT-5);
-
-  for(let t=30;t<=endT;t+=5){
-    let a=interp(t,src);
-    let bPrev=interp(t-30,src);
-
-    if(a!=null&&bPrev!=null){
-      let v=(a-bPrev)/0.5;
-
-      if(v<0)v=0;
-      if(v>35)v=35;
-
-      if(prevV!==null && t>420 && v>prevV+1.0){
-        v=prevV+1.0;
-      }
-
-      if(prevV!==null && t>480 && v<prevV-0.6){
-        v=prevV-0.6;
-      }
-
-      out.push({t:t,v:v});
-      prevV=v;
-    }
-  }
-
-  return smooth(out);
-}
-
-function smooth(r){
-  return r.map((p,i)=>{
-    let vals=[];
-
-    let range;
-    if(p.t < 360){
-      range = 2;
-    }else if(p.t < 420){
-      range = 4;
-    }else{
-      range = 10;
-    }
-
-    for(let j=i-range;j<=i+range;j++){
-      if(r[j])vals.push(r[j].v);
-    }
-
-    let avg=vals.reduce((a,b)=>a+b,0)/vals.length;
-
-    if(avg<0)avg=0;
-    if(avg>30)avg=30;
-
-    return {t:p.t,v:avg};
-  });
-}
-
-function phase(){
-  let s=events.Charge||0;
-  let g=events.GC;
-  let f=events.FC;
-  let d=events.Drop;
-
-  if(!g||!f||!d)return;
-
-  let tot=d-s;
-  if(tot<=0)return;
-
-  dry.innerText=((g-s)/tot*100).toFixed(0)+"%";
-  mai.innerText=((f-g)/tot*100).toFixed(0)+"%";
-  dev.innerText=((d-f)/tot*100).toFixed(0)+"%";
-}
-
-function stepLine(points,key,x,y){
-  if(!points.length)return;
-
-  ctx.beginPath();
-  let prev=points[0];
-  ctx.moveTo(x(prev.t),y(prev[key]));
-
-  for(let i=1;i<points.length;i++){
-    let cur=points[i];
-    ctx.lineTo(x(cur.t),y(prev[key]));
-    ctx.lineTo(x(cur.t),y(cur[key]));
-    prev=cur;
-  }
-
-  ctx.stroke();
-}
-
+/* ===== 描画 ===== */
 function draw(){
-  phase();
-  hitTargets=[];
-  eventTargets=[];
-  ctx.clearRect(0,0,c.width,c.height);
 
-  let L=70,T=25,R=80,B=95;
-  let W=c.width-L-R;
-  let H=c.height-T-B;
+hitBT=[];hitEV=[];
+ctx.clearRect(0,0,c.width,c.height);
 
-  let maxTime=14*60;
-  let maxTemp=230;
-  let maxRor=30;
+let L=70,T=30,W=1000,H=450;
+let x=t=>L+(t/840)*W;
+let y=v=>T+H-(v/230)*H;
+let yR=v=>T+H-(v/30)*H;
 
-  let x=t=>L+(t/maxTime)*W;
-  let yBT=v=>T+H-(v/maxTemp)*H;
-  let yRor=v=>T+H-(Math.max(0,Math.min(maxRor,v))/maxRor)*H;
-
-  let pfTop=T+H*(2/3);
-  let pfH=H/3;
-  let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
-
-  ctx.fillStyle="#fff";
-  ctx.fillRect(0,0,c.width,c.height);
-
-  ctx.font="13px Arial";
-  ctx.textBaseline="middle";
-
-  for(let temp=0;temp<=230;temp+=5){
-    let y=yBT(temp);
-    ctx.strokeStyle=temp%10===0 ? "#ddd" : "#eee";
-    ctx.lineWidth=1;
-    ctx.beginPath();
-    ctx.moveTo(L,y);
-    ctx.lineTo(L+W,y);
-    ctx.stroke();
-
-    if(temp%10===0){
-      ctx.fillStyle="#000";
-      ctx.fillText(temp+"C",10,y);
-    }
-  }
-
-  for(let sec=0;sec<=maxTime;sec+=30){
-    let xx=x(sec);
-    ctx.strokeStyle=sec%60===0 ? "#ddd" : "#f3f3f3";
-    ctx.beginPath();
-    ctx.moveTo(xx,T);
-    ctx.lineTo(xx,T+H);
-    ctx.stroke();
-
-    if(sec%60===0){
-      ctx.fillStyle="#000";
-      ctx.fillText((sec/60)+"m",xx-10,T+H+25);
-    }
-  }
-
-  ctx.strokeStyle="#000";
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.moveTo(L,T);
-  ctx.lineTo(L,T+H);
-  ctx.lineTo(L+W,T+H);
-  ctx.stroke();
-
-  ctx.fillStyle="#666";
-  ctx.font="12px Arial";
-  for(let r=0;r<=30;r+=5){
-    let y=yRor(r);
-    ctx.fillText(r,L+W+12,y);
-  }
-  ctx.fillText("RoR",L+W+12,T+12);
-
-  ctx.strokeStyle="rgba(0,0,0,0.25)";
-  ctx.setLineDash([4,4]);
-  ctx.beginPath();
-  ctx.moveTo(L,pfTop);
-  ctx.lineTo(L+W,pfTop);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.fillStyle="#666";
-  ctx.font="13px Arial";
-  ctx.fillText("Power / Fan zone",L+8,pfTop+14);
-
-  compareData.forEach(src=>{
-    let b=btRows(src);
-    if(!b.length)return;
-
-    ctx.save();
-    ctx.globalAlpha=0.35;
-    ctx.strokeStyle="blue";
-    ctx.lineWidth=3;
-    ctx.beginPath();
-
-    b.forEach((p,i)=>{
-      if(p.t<0||p.t>maxTime)return;
-      let xx=x(p.t);
-      let yy=yBT(p.bt);
-
-      if(i===0)ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    });
-
-    ctx.stroke();
-    ctx.restore();
-  });
-
-  let b=btRows(rows);
-
-  if(b.length){
-    ctx.strokeStyle="black";
-    ctx.lineWidth=3;
-    ctx.beginPath();
-
-    b.forEach((p,i)=>{
-      if(p.t<0||p.t>maxTime)return;
-      let xx=x(p.t);
-      let yy=yBT(p.bt);
-
-      if(i===0)ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    });
-
-    ctx.stroke();
-
-    ctx.fillStyle="black";
-    ctx.font="14px Arial";
-
-    b.forEach(p=>{
-      if(p.t<0||p.t>maxTime)return;
-
-      let xx=x(p.t);
-      let yy=yBT(p.bt);
-
-      ctx.beginPath();
-      ctx.arc(xx,yy,5,0,Math.PI*2);
-      ctx.fill();
-
-      ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-10);
-
-      if(selectedPoint===p){
-        ctx.strokeStyle="red";
-        ctx.lineWidth=3;
-        ctx.beginPath();
-        ctx.arc(xx,yy,10,0,Math.PI*2);
-        ctx.stroke();
-      }
-
-      hitTargets.push({
-        row:p,
-        x:xx,
-        y:yy,
-        labelX:xx+7,
-        labelY:yy-10,
-        radius:30
-      });
-    });
-  }
-
-  let rr=ror(rows);
-
-  if(rr.length){
-    ctx.save();
-    ctx.globalAlpha=0.5;
-    ctx.strokeStyle="orange";
-    ctx.lineWidth=3;
-    ctx.beginPath();
-
-    rr.forEach((p,i)=>{
-      if(p.t<0||p.t>maxTime)return;
-
-      let xx=x(p.t);
-      let yy=yRor(p.v);
-
-      if(i===0)ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    });
-
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  let pwData=rows.filter(r=>!isNaN(r.pw)).sort((a,b)=>a.t-b.t);
-
-  if(pwData.length){
-    ctx.save();
-    ctx.globalAlpha=0.5;
-    ctx.strokeStyle="red";
-    ctx.lineWidth=3;
-    stepLine(pwData,"pw",x,yPF);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  let fanData=rows.filter(r=>!isNaN(r.fan)).sort((a,b)=>a.t-b.t);
-
-  if(fanData.length){
-    ctx.save();
-    ctx.globalAlpha=0.5;
-    ctx.strokeStyle="blue";
-    ctx.lineWidth=3;
-    stepLine(fanData,"fan",x,yPF);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Event dots, not vertical lines
-  Object.keys(events).forEach(name=>{
-    let t=events[name];
-    if(t<0||t>maxTime)return;
-
-    let temp=interp(t,rows);
-    if(temp==null)temp=30;
-
-    let xx=x(t);
-    let yy=yBT(temp)-18;
-
-    ctx.fillStyle="#8a4b08";
-    ctx.beginPath();
-    ctx.arc(xx,yy,7,0,Math.PI*2);
-    ctx.fill();
-
-    ctx.fillStyle="#8a4b08";
-    ctx.font="12px Arial";
-    ctx.fillText(name+" "+fmt(t),xx+9,yy);
-
-    eventTargets.push({
-      name:name,
-      x:xx,
-      y:yy,
-      radius:18
-    });
-  });
-
-  // Phase band below graph
-  let s=events.Charge||0;
-  let g=events.GC;
-  let f=events.FC;
-  let d=events.Drop;
-
-  if(g&&f&&d){
-    let bandY=T+H+43;
-    let bandH=18;
-
-    ctx.fillStyle="rgba(242,214,162,.9)";
-    ctx.fillRect(x(s),bandY,x(g)-x(s),bandH);
-
-    ctx.fillStyle="rgba(212,180,140,.9)";
-    ctx.fillRect(x(g),bandY,x(f)-x(g),bandH);
-
-    ctx.fillStyle="rgba(200,136,111,.9)";
-    ctx.fillRect(x(f),bandY,x(d)-x(f),bandH);
-
-    ctx.fillStyle="#333";
-    ctx.font="12px Arial";
-    ctx.fillText("Dry",x(s)+4,bandY+9);
-    ctx.fillText("Maillard",x(g)+4,bandY+9);
-    ctx.fillText("Dev",x(f)+4,bandY+9);
-  }
-
-  ctx.fillStyle="#000";
-  ctx.font="14px Arial";
-  ctx.fillText("Event dots / Phase band / Click BT select / RoR strong smooth after 7min",L+10,T+18);
+/* grid */
+for(let i=0;i<=230;i+=10){
+let yy=y(i);
+ctx.strokeStyle="#eee";
+ctx.beginPath();
+ctx.moveTo(L,yy);ctx.lineTo(L+W,yy);ctx.stroke();
 }
 
-c.addEventListener("click",function(e){
-  let rect=c.getBoundingClientRect();
-  let sx=c.width/rect.width;
-  let sy=c.height/rect.height;
+/* BT */
+let b=btRows();
+ctx.beginPath();
+b.forEach((p,i)=>{
+let xx=x(p.t),yy=y(p.bt);
+if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);
+});
+ctx.strokeStyle="#000";ctx.lineWidth=3;ctx.stroke();
 
-  let mx=(e.clientX-rect.left)*sx;
-  let my=(e.clientY-rect.top)*sy;
+/* BT点 */
+b.forEach(p=>{
+let xx=x(p.t),yy=y(p.bt);
+ctx.beginPath();ctx.arc(xx,yy,5,0,Math.PI*2);ctx.fill();
 
-  let eventHits=eventTargets.map(h=>{
-    return {h:h,d:Math.hypot(mx-h.x,my-h.y)};
-  }).filter(o=>o.d<=o.h.radius);
+if(selected===p){
+ctx.strokeStyle="red";
+ctx.lineWidth=3;
+ctx.beginPath();
+ctx.arc(xx,yy,10,0,Math.PI*2);
+ctx.stroke();
+}
 
-  if(eventHits.length){
-    eventHits.sort((a,b)=>a.d-b.d);
-    editEvent(eventHits[0].h.name);
-    return;
-  }
-
-  let candidates=hitTargets.map(h=>{
-    let d1=Math.hypot(mx-h.x,my-h.y);
-    let d2=Math.hypot(mx-h.labelX,my-h.labelY);
-    return {h:h,d:Math.min(d1,d2)};
-  }).filter(o=>o.d<=o.h.radius);
-
-  if(!candidates.length)return;
-
-  candidates.sort((a,b)=>a.d-b.d);
-  selectedPoint=candidates[0].h.row;
-  selectedInfo.innerText="選択中：BT "+selectedPoint.bt+"C / "+fmt(selectedPoint.t);
-  draw();
+hitBT.push({p,xx,yy});
 });
 
-function parseTime(v){
-  v=String(v).trim();
+/* RoR */
+let rr=ror();
+ctx.beginPath();
+rr.forEach((p,i)=>{
+let xx=x(p.t),yy=yR(p.v);
+if(i==0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);
+});
+ctx.strokeStyle="orange";ctx.globalAlpha=0.5;ctx.stroke();ctx.globalAlpha=1;
 
-  if(v.includes(":")){
-    let p=v.split(":");
-    if(p.length!==2)return null;
+/* Eventドット */
+Object.keys(events).forEach(n=>{
+let t=events[n];
+let temp=interp(t)||30;
+let xx=x(t),yy=y(temp)-20;
 
-    let m=parseInt(p[0],10);
-    let s=parseInt(p[1],10);
+ctx.fillStyle="#8a4b08";
+ctx.beginPath();ctx.arc(xx,yy,7,0,Math.PI*2);ctx.fill();
+ctx.fillText(n,xx+8,yy);
 
-    if(isNaN(m)||isNaN(s)||s<0||s>59)return null;
-    return m*60+s;
-  }
+hitEV.push({name:n,xx,yy});
+});
 
-  let n=parseFloat(v);
-  if(isNaN(n))return null;
-  return Math.max(0,Math.floor(n));
+/* フェーズ帯 */
+let s=events.Charge||0,g=events.GC,f=events.FC,d=events.Drop;
+if(g&&f&&d){
+let yb=T+H+40;
+ctx.fillStyle="#f2d6a2";ctx.fillRect(x(s),yb,x(g)-x(s),15);
+ctx.fillStyle="#d4b48c";ctx.fillRect(x(g),yb,x(f)-x(g),15);
+ctx.fillStyle="#c8886f";ctx.fillRect(x(f),yb,x(d)-x(f),15);
 }
 
-function editSelectedPoint(){
-  if(!selectedPoint){
-    alert("先にグラフ上のBT点を選択してください");
-    return;
-  }
-  editPoint(selectedPoint);
 }
 
-function deleteSelectedPoint(){
-  if(!selectedPoint){
-    alert("先にグラフ上のBT点を選択してください");
-    return;
-  }
-  let idx=rows.indexOf(selectedPoint);
-  if(idx>=0)rows.splice(idx,1);
-  selectedPoint=null;
-  selectedInfo.innerText="選択中：なし";
-  draw();
+/* クリック */
+c.onclick=e=>{
+let rect=c.getBoundingClientRect();
+let mx=e.clientX-rect.left,my=e.clientY-rect.top;
+
+hitBT.forEach(h=>{
+if(Math.hypot(mx-h.xx,my-h.yy)<10){
+selected=h.p;
+sel.innerText="BT "+h.p.bt;
+}
+});
+draw();
+};
+
+function editSelected(){
+if(!selected)return;
+let v=prompt("BT",selected.bt);
+if(v!=null)selected.bt=parseFloat(v);
+draw();
 }
 
-function editPoint(row){
-  let newTime=prompt("Time mm:ss",fmt(row.t));
-  if(newTime===null)return;
-
-  let parsed=parseTime(newTime);
-  if(parsed===null){
-    alert("Invalid time");
-    return;
-  }
-
-  let newBT=prompt("BT",isNaN(row.bt)?"":row.bt);
-  if(newBT===null)return;
-
-  let newPower=prompt("Power",isNaN(row.pw)?"":row.pw);
-  if(newPower===null)return;
-
-  let newFan=prompt("Fan",isNaN(row.fan)?"":row.fan);
-  if(newFan===null)return;
-
-  row.t=parsed;
-  row.bt=newBT===""?NaN:parseFloat(newBT);
-  row.pw=newPower===""?NaN:parseFloat(newPower);
-  row.fan=newFan===""?NaN:parseFloat(newFan);
-
-  rows.sort((a,b)=>a.t-b.t);
-  selectedInfo.innerText="選択中：BT "+row.bt+"C / "+fmt(row.t);
-  draw();
+function deleteSelected(){
+if(!selected)return;
+rows=rows.filter(r=>r!==selected);
+selected=null;
+sel.innerText="未選択";
+draw();
 }
 
-function editEvent(name){
-  let action=prompt(name+" edit or delete", "edit");
-  if(action===null)return;
-
-  if(action.toLowerCase()==="delete"){
-    delete events[name];
-    draw();
-    return;
-  }
-
-  let newTime=prompt(name+" Time mm:ss",fmt(events[name]));
-  if(newTime===null)return;
-
-  let parsed=parseTime(newTime);
-  if(parsed===null){
-    alert("Invalid time");
-    return;
-  }
-
-  events[name]=parsed;
-  draw();
-}
-
-function saveProfile(){
-  let name=profileName.value||"profile_"+Date.now();
-  localStorage.setItem(name,JSON.stringify({
-    rows:rows,
-    events:events
-  }));
-  loadList();
-}
-
-function loadProfile(){
-  let name=profiles.value;
-  if(!name)return;
-
-  let p=JSON.parse(localStorage.getItem(name));
-  rows=p.rows||[];
-  events=p.events||{};
-  selectedPoint=null;
-  selectedInfo.innerText="選択中：なし";
-  draw();
-}
-
-function compare(){
-  let name=profiles.value;
-  if(!name)return;
-
-  let p=JSON.parse(localStorage.getItem(name));
-  compareData.push(p.rows||[]);
-  draw();
-}
-
-function clearCompare(){
-  compareData=[];
-  draw();
-}
-
-function loadList(){
-  profiles.innerHTML="";
-  Object.keys(localStorage).forEach(k=>{
-    profiles.innerHTML+=`<option value="${k}">${k}</option>`;
-  });
-}
-
-function exportCSV(){
-  let csv="Time,Seconds,BT,Power,Fan,RoR\n";
-  let rr=ror(rows);
-
-  rows.forEach(r=>{
-    let nearest="";
-    let best=null;
-    let bestDiff=99999;
-
-    rr.forEach(x=>{
-      let diff=Math.abs(x.t-r.t);
-      if(diff<bestDiff){
-        bestDiff=diff;
-        best=x;
-      }
-    });
-
-    if(best)nearest=best.v.toFixed(2);
-
-    csv+=fmt(r.t)+","+r.t+","+r.bt+","+r.pw+","+r.fan+","+nearest+"\n";
-  });
-
-  csv+="\nEvents\n";
-  Object.keys(events).forEach(k=>{
-    csv+=k+","+fmt(events[k])+","+events[k]+"\n";
-  });
-
-  let a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
-  a.download="artisan_rm500.csv";
-  a.click();
-}
-
-loadList();
 draw();
 </script>
 
