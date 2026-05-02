@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Pro v12 Edit BT Power Fan</title>
+<title>RM500 Pro v13 Event Edit</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
@@ -12,12 +12,14 @@ body{margin:0;background:#f5f5f5;font-family:Arial}
 .card{background:#fff;padding:10px;border-radius:10px;border:1px solid #ddd;flex:1}
 button{padding:8px;border:0;border-radius:6px;background:#222;color:#fff;margin:2px}
 .red{background:#9b1c1c}
+.eventBtn{background:#8a4b08}
 input,select{padding:6px;margin:2px}
 #time{font-size:32px;text-align:center}
 canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
 .inputRow{display:grid;grid-template-columns:50px auto auto auto;align-items:center;gap:6px;margin:6px 0}
 .inputRow label{font-weight:bold;text-align:right}
 .inputRow input{width:120px}
+.small{font-size:12px;color:#555}
 </style>
 </head>
 
@@ -69,11 +71,14 @@ Profile
 </div>
 
 <div class="card">
-<button onclick="mark('Charge')">Charge</button>
-<button onclick="mark('Bottom')">Bottom</button>
-<button onclick="mark('GC')">GC</button>
-<button onclick="mark('FC')">FC</button>
-<button onclick="mark('Drop')">Drop</button>
+<button class="eventBtn" onclick="mark('Charge')">Charge</button>
+<button class="eventBtn" onclick="mark('Bottom')">Bottom</button>
+<button class="eventBtn" onclick="mark('GC')">GC</button>
+<button class="eventBtn" onclick="mark('FC')">FC</button>
+<button class="eventBtn" onclick="mark('Drop')">Drop</button><br>
+<button onclick="editSelectedEvent()">選択イベント編集</button>
+<button class="red" onclick="deleteSelectedEvent()">選択イベント削除</button>
+<div class="small" id="eventSel">イベント選択：なし</div>
 </div>
 
 </div>
@@ -94,6 +99,8 @@ Profile
 let rows=[],events={},compareData=[];
 let running=false,startT=0,base=0;
 let selected=null;
+let selectedEvent=null;
+let eventTargets=[];
 
 const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d");
@@ -102,6 +109,7 @@ const btEl=document.getElementById("bt");
 const pwEl=document.getElementById("pw");
 const fanEl=document.getElementById("fan");
 const selEl=document.getElementById("sel");
+const eventSelEl=document.getElementById("eventSel");
 
 function now(){return running?base+Math.floor((Date.now()-startT)/1000):base}
 
@@ -166,6 +174,8 @@ function save(){
 
 function mark(n){
   events[n]=now();
+  selectedEvent=n;
+  eventSelEl.innerText="イベント選択："+n+" / "+fmt(events[n]);
   draw();
 }
 
@@ -235,6 +245,7 @@ function smooth(r){
 }
 
 function draw(){
+  eventTargets=[];
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   let L=60,T=25,W=1050,H=420;
@@ -370,11 +381,29 @@ function draw(){
   Object.keys(events).forEach(n=>{
     let t=events[n];
     let xx=x(t),yy=y(interp(t)||30)-18;
+
     ctx.fillStyle="#8a4b08";
     ctx.beginPath();
     ctx.arc(xx,yy,6,0,Math.PI*2);
     ctx.fill();
-    ctx.fillText(n,xx+6,yy);
+
+    if(selectedEvent===n){
+      ctx.strokeStyle="red";
+      ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.arc(xx,yy,11,0,Math.PI*2);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle="#8a4b08";
+    ctx.fillText(n+" "+fmt(t),xx+8,yy);
+
+    eventTargets.push({
+      name:n,
+      x:xx,
+      y:yy,
+      radius:18
+    });
   });
 
   let s=events.Charge||0,g=events.GC,f=events.FC,d=events.Drop;
@@ -420,6 +449,21 @@ canvas.onclick=e=>{
   let rect=canvas.getBoundingClientRect();
   let mx=(e.clientX-rect.left)*(canvas.width/rect.width);
   let my=(e.clientY-rect.top)*(canvas.height/rect.height);
+
+  let eventHit=false;
+
+  eventTargets.forEach(ev=>{
+    if(Math.hypot(mx-ev.x,my-ev.y)<ev.radius){
+      selectedEvent=ev.name;
+      eventSelEl.innerText="イベント選択："+ev.name+" / "+fmt(events[ev.name]);
+      eventHit=true;
+    }
+  });
+
+  if(eventHit){
+    draw();
+    return;
+  }
 
   selected=null;
 
@@ -508,6 +552,38 @@ function delSel(){
   draw();
 }
 
+function editSelectedEvent(){
+  if(!selectedEvent){
+    alert("先にグラフ上のイベントドットを選択してください");
+    return;
+  }
+
+  let newTime=prompt(selectedEvent+" Time mm:ss",fmt(events[selectedEvent]));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  events[selectedEvent]=parsed;
+  eventSelEl.innerText="イベント選択："+selectedEvent+" / "+fmt(parsed);
+  draw();
+}
+
+function deleteSelectedEvent(){
+  if(!selectedEvent){
+    alert("先にグラフ上のイベントドットを選択してください");
+    return;
+  }
+
+  delete events[selectedEvent];
+  selectedEvent=null;
+  eventSelEl.innerText="イベント選択：なし";
+  draw();
+}
+
 function saveProfile(){
   let name=profileName.value||"profile_"+Date.now();
   localStorage.setItem(name,JSON.stringify({rows,events}));
@@ -519,7 +595,9 @@ function loadProfile(){
   rows=p.rows||[];
   events=p.events||{};
   selected=null;
+  selectedEvent=null;
   selEl.innerText="未選択";
+  eventSelEl.innerText="イベント選択：なし";
   draw();
 }
 
@@ -545,6 +623,11 @@ function exportCSV(){
   let csv="t,bt,pw,fan\n";
   rows.forEach(r=>{
     csv+=r.t+","+r.bt+","+r.pw+","+r.fan+"\n";
+  });
+
+  csv+="\nEvents\n";
+  Object.keys(events).forEach(k=>{
+    csv+=k+","+events[k]+","+fmt(events[k])+"\n";
   });
 
   let a=document.createElement("a");
