@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v7 RoR End Fix</title>
+<title>RM500 Artisan Pro v8 Smooth After 7min</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
@@ -226,7 +226,14 @@ function smooth(r){
   return r.map((p,i)=>{
     let vals=[];
 
-    let range = p.t < 360 ? 2 : 4;
+    let range;
+    if(p.t < 360){
+      range = 2;
+    }else if(p.t < 420){
+      range = 4;
+    }else{
+      range = 10;
+    }
 
     for(let j=i-range;j<=i+range;j++){
       if(r[j])vals.push(r[j].v);
@@ -495,7 +502,7 @@ function draw(){
 
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("RoR End Fix / Balanced Smooth / Fixed Axis / Click BT edit-delete",L+10,T+18);
+  ctx.fillText("RoR Smooth After 7min / Fixed Axis / Click BT edit-delete",L+10,T+18);
 }
 
 c.addEventListener("click",function(e){
