@@ -3,16 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Artisan Pro v8 Smooth After 7min</title>
+<title>RM500 Artisan Pro v9 Event Dots</title>
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial;color:#222}
 .card{background:#fff;margin:10px;padding:12px;border-radius:10px;border:1px solid #ddd}
 button{padding:10px;margin:4px;border:0;border-radius:8px;background:#222;color:#fff}
 .event{background:#8a4b08}
+.red{background:#9b1c1c}
 input,select{padding:8px;margin:4px}
 #time{font-size:42px;text-align:center}
-canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
+canvas{width:100%;height:540px;border:2px solid #000;background:#fff;cursor:pointer}
 .metric{display:inline-block;margin:5px;padding:8px;background:#eee;border-radius:6px}
+.small{font-size:12px;color:#666}
 </style>
 </head>
 
@@ -54,6 +56,13 @@ Fan
 <button class="event" onclick="mark('GC')">GC</button>
 <button class="event" onclick="mark('FC')">1C</button>
 <button class="event" onclick="mark('Drop')">Drop</button>
+<div class="small">イベントは縦線ではなく、茶色のドットでグラフ上に表示されます</div>
+</div>
+
+<div class="card">
+<button onclick="editSelectedPoint()">選択BTを編集</button>
+<button class="red" onclick="deleteSelectedPoint()">選択BTを消去</button>
+<span class="small" id="selectedInfo">選択中：なし</span>
 </div>
 
 <div class="card">
@@ -73,13 +82,15 @@ Profile <input id="profileName">
 </div>
 
 <div class="card">
-<canvas id="c" width="1200" height="560"></canvas>
+<canvas id="c" width="1200" height="590"></canvas>
 </div>
 
 <script>
 let running=false,startT=0,base=0;
 let rows=[],events={},compareData=[];
 let hitTargets=[];
+let eventTargets=[];
+let selectedPoint=null;
 
 const ctx=c.getContext("2d");
 const timeEl=document.getElementById("time");
@@ -284,9 +295,10 @@ function stepLine(points,key,x,y){
 function draw(){
   phase();
   hitTargets=[];
+  eventTargets=[];
   ctx.clearRect(0,0,c.width,c.height);
 
-  let L=70,T=25,R=80,B=70;
+  let L=70,T=25,R=80,B=95;
   let W=c.width-L-R;
   let H=c.height-T-B;
 
@@ -421,6 +433,14 @@ function draw(){
 
       ctx.fillText(Math.round(p.bt)+"C",xx+7,yy-10);
 
+      if(selectedPoint===p){
+        ctx.strokeStyle="red";
+        ctx.lineWidth=3;
+        ctx.beginPath();
+        ctx.arc(xx,yy,10,0,Math.PI*2);
+        ctx.stroke();
+      }
+
       hitTargets.push({
         row:p,
         x:xx,
@@ -479,30 +499,63 @@ function draw(){
     ctx.restore();
   }
 
+  // Event dots, not vertical lines
   Object.keys(events).forEach(name=>{
     let t=events[name];
     if(t<0||t>maxTime)return;
 
+    let temp=interp(t,rows);
+    if(temp==null)temp=30;
+
     let xx=x(t);
+    let yy=yBT(temp)-18;
 
-    ctx.strokeStyle="#b36b00";
-    ctx.lineWidth=2;
+    ctx.fillStyle="#8a4b08";
     ctx.beginPath();
-    ctx.moveTo(xx,T);
-    ctx.lineTo(xx,T+H);
-    ctx.stroke();
+    ctx.arc(xx,yy,7,0,Math.PI*2);
+    ctx.fill();
 
-    ctx.fillStyle="#b36b00";
-    ctx.save();
-    ctx.translate(xx+6,T+25);
-    ctx.rotate(Math.PI/2);
-    ctx.fillText(name+" "+fmt(t),0,0);
-    ctx.restore();
+    ctx.fillStyle="#8a4b08";
+    ctx.font="12px Arial";
+    ctx.fillText(name+" "+fmt(t),xx+9,yy);
+
+    eventTargets.push({
+      name:name,
+      x:xx,
+      y:yy,
+      radius:18
+    });
   });
+
+  // Phase band below graph
+  let s=events.Charge||0;
+  let g=events.GC;
+  let f=events.FC;
+  let d=events.Drop;
+
+  if(g&&f&&d){
+    let bandY=T+H+43;
+    let bandH=18;
+
+    ctx.fillStyle="rgba(242,214,162,.9)";
+    ctx.fillRect(x(s),bandY,x(g)-x(s),bandH);
+
+    ctx.fillStyle="rgba(212,180,140,.9)";
+    ctx.fillRect(x(g),bandY,x(f)-x(g),bandH);
+
+    ctx.fillStyle="rgba(200,136,111,.9)";
+    ctx.fillRect(x(f),bandY,x(d)-x(f),bandH);
+
+    ctx.fillStyle="#333";
+    ctx.font="12px Arial";
+    ctx.fillText("Dry",x(s)+4,bandY+9);
+    ctx.fillText("Maillard",x(g)+4,bandY+9);
+    ctx.fillText("Dev",x(f)+4,bandY+9);
+  }
 
   ctx.fillStyle="#000";
   ctx.font="14px Arial";
-  ctx.fillText("RoR Smooth After 7min / Fixed Axis / Click BT edit-delete",L+10,T+18);
+  ctx.fillText("Event dots / Phase band / Click BT select / RoR strong smooth after 7min",L+10,T+18);
 }
 
 c.addEventListener("click",function(e){
@@ -513,6 +566,16 @@ c.addEventListener("click",function(e){
   let mx=(e.clientX-rect.left)*sx;
   let my=(e.clientY-rect.top)*sy;
 
+  let eventHits=eventTargets.map(h=>{
+    return {h:h,d:Math.hypot(mx-h.x,my-h.y)};
+  }).filter(o=>o.d<=o.h.radius);
+
+  if(eventHits.length){
+    eventHits.sort((a,b)=>a.d-b.d);
+    editEvent(eventHits[0].h.name);
+    return;
+  }
+
   let candidates=hitTargets.map(h=>{
     let d1=Math.hypot(mx-h.x,my-h.y);
     let d2=Math.hypot(mx-h.labelX,my-h.labelY);
@@ -522,7 +585,9 @@ c.addEventListener("click",function(e){
   if(!candidates.length)return;
 
   candidates.sort((a,b)=>a.d-b.d);
-  editPoint(candidates[0].h.row);
+  selectedPoint=candidates[0].h.row;
+  selectedInfo.innerText="選択中：BT "+selectedPoint.bt+"C / "+fmt(selectedPoint.t);
+  draw();
 });
 
 function parseTime(v){
@@ -544,17 +609,27 @@ function parseTime(v){
   return Math.max(0,Math.floor(n));
 }
 
-function editPoint(row){
-  let action=prompt("edit or delete", "edit");
-  if(action===null)return;
-
-  if(action.toLowerCase()==="delete"){
-    let idx=rows.indexOf(row);
-    if(idx>=0)rows.splice(idx,1);
-    draw();
+function editSelectedPoint(){
+  if(!selectedPoint){
+    alert("先にグラフ上のBT点を選択してください");
     return;
   }
+  editPoint(selectedPoint);
+}
 
+function deleteSelectedPoint(){
+  if(!selectedPoint){
+    alert("先にグラフ上のBT点を選択してください");
+    return;
+  }
+  let idx=rows.indexOf(selectedPoint);
+  if(idx>=0)rows.splice(idx,1);
+  selectedPoint=null;
+  selectedInfo.innerText="選択中：なし";
+  draw();
+}
+
+function editPoint(row){
   let newTime=prompt("Time mm:ss",fmt(row.t));
   if(newTime===null)return;
 
@@ -579,6 +654,30 @@ function editPoint(row){
   row.fan=newFan===""?NaN:parseFloat(newFan);
 
   rows.sort((a,b)=>a.t-b.t);
+  selectedInfo.innerText="選択中：BT "+row.bt+"C / "+fmt(row.t);
+  draw();
+}
+
+function editEvent(name){
+  let action=prompt(name+" edit or delete", "edit");
+  if(action===null)return;
+
+  if(action.toLowerCase()==="delete"){
+    delete events[name];
+    draw();
+    return;
+  }
+
+  let newTime=prompt(name+" Time mm:ss",fmt(events[name]));
+  if(newTime===null)return;
+
+  let parsed=parseTime(newTime);
+  if(parsed===null){
+    alert("Invalid time");
+    return;
+  }
+
+  events[name]=parsed;
   draw();
 }
 
@@ -598,6 +697,8 @@ function loadProfile(){
   let p=JSON.parse(localStorage.getItem(name));
   rows=p.rows||[];
   events=p.events||{};
+  selectedPoint=null;
+  selectedInfo.innerText="選択中：なし";
   draw();
 }
 
