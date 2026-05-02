@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RM500 Pro v11 UI + Strong Dev Smooth FIX</title>
+<title>RM500 Pro v11 Input Label Fix</title>
 
 <style>
 body{margin:0;background:#f5f5f5;font-family:Arial}
@@ -15,6 +15,21 @@ button{padding:8px;border:0;border-radius:6px;background:#222;color:#fff;margin:
 input,select{padding:6px;margin:2px}
 #time{font-size:32px;text-align:center}
 canvas{width:100%;height:520px;border:2px solid #000;background:#fff;cursor:pointer}
+
+.inputRow{
+  display:grid;
+  grid-template-columns:50px 1fr;
+  align-items:center;
+  gap:6px;
+  margin:6px 0;
+}
+.inputRow label{
+  font-weight:bold;
+  text-align:right;
+}
+.inputRow input{
+  width:160px;
+}
 </style>
 </head>
 
@@ -44,9 +59,18 @@ Profile
 </div>
 
 <div class="card">
-BT <input id="bt">
-PW <input id="pw">
-FAN <input id="fan"><br>
+<div class="inputRow">
+  <label for="bt">BT</label>
+  <input id="bt">
+</div>
+<div class="inputRow">
+  <label for="pw">PW</label>
+  <input id="pw">
+</div>
+<div class="inputRow">
+  <label for="fan">FAN</label>
+  <input id="fan">
+</div>
 <button onclick="save()">Save</button>
 </div>
 
@@ -217,8 +241,8 @@ function draw(){
   let y=v=>T+H-(v/230)*H;
   let yR=v=>T+H-(v/30)*H;
 
-  // grid
   ctx.font="12px Arial";
+
   for(let temp=0;temp<=230;temp+=10){
     let yy=y(temp);
     ctx.strokeStyle="#eee";
@@ -244,7 +268,6 @@ function draw(){
     }
   }
 
-  // compare
   compareData.forEach(src=>{
     let cb=btRows(src);
     if(!cb.length)return;
@@ -265,7 +288,6 @@ function draw(){
     ctx.restore();
   });
 
-  // BT line
   let b=btRows();
   if(b.length){
     ctx.beginPath();
@@ -279,7 +301,6 @@ function draw(){
     ctx.stroke();
   }
 
-  // BT dots
   b.forEach(p=>{
     let xx=x(p.t),yy=y(p.bt);
     ctx.fillStyle="#000";
@@ -296,7 +317,6 @@ function draw(){
     }
   });
 
-  // ROR
   let rr=ror();
   if(rr.length){
     ctx.beginPath();
@@ -312,7 +332,6 @@ function draw(){
     ctx.globalAlpha=1;
   }
 
-  // Power/Fan lower zone
   let pfTop=T+H*(2/3);
   let pfH=H/3;
   let yPF=v=>pfTop+pfH-(Math.max(0,Math.min(100,v))/100)*pfH;
@@ -345,7 +364,6 @@ function draw(){
     ctx.restore();
   }
 
-  // Event dots
   Object.keys(events).forEach(n=>{
     let t=events[n];
     let xx=x(t),yy=y(interp(t)||30)-18;
@@ -356,7 +374,6 @@ function draw(){
     ctx.fillText(n,xx+6,yy);
   });
 
-  // Phase band + %
   let s=events.Charge||0,g=events.GC,f=events.FC,d=events.Drop;
 
   if(g&&f&&d){
